@@ -44,19 +44,28 @@ python -m unittest discover -s tests
 # 运行启发式 baseline，并生成 JSON/CSV/PNG 图表
 python experiments/run_baselines_only.py --episodes 5 --seed 0
 
+# 运行本文新方法 CASCADE
+python experiments/run_cascade.py --episodes 5 --seed 0
+
 # 指定输出目录
 python experiments/run_baselines_only.py \
   --config configs/env/scenario_s1_dongting.yaml \
   --episodes 5 \
   --output-dir outputs/results/s1_baselines
 
-# 运行完整对比实验
-python experiments/run_e1_comparison.py
+# 运行 E1 主对比：CASCADE vs baselines
+python experiments/run_e1_comparison.py --episodes 5 --seed 0
 ```
 
 ## 实验输入输出
 
-Baseline 评估入口为 `experiments/run_baselines_only.py`。默认输入为 `configs/env/scenario_s1_dongting.yaml`，输出目录为 `outputs/results/baselines_<timestamp>/`。
+当前有三个常用评估入口：
+
+- `experiments/run_cascade.py`：只运行本文新方法 CASCADE。
+- `experiments/run_baselines_only.py`：只运行 Greedy / MinLoad / RoundRobin / HEFT baseline。
+- `experiments/run_e1_comparison.py`：运行 E1 主对比，包含 CASCADE + baselines。
+
+默认输入为 `configs/env/scenario_s1_dongting.yaml`，输出目录为 `outputs/results/<experiment>_<timestamp>/`。
 
 每次运行会生成：
 
@@ -72,12 +81,26 @@ Baseline 评估入口为 `experiments/run_baselines_only.py`。默认输入为 `
 推荐先用本地输出确认结果，再把同一命令放到远程服务器上跑更多 episode。
 
 ```bash
+python experiments/run_cascade.py \
+  --config configs/env/scenario_s1_dongting.yaml \
+  --episodes 20 \
+  --seed 0 \
+  --output-dir outputs/results/s1_cascade_20ep
+
 python experiments/run_baselines_only.py \
   --config configs/env/scenario_s1_dongting.yaml \
   --episodes 20 \
   --seed 0 \
   --output-dir outputs/results/s1_baselines_20ep
+
+python experiments/run_e1_comparison.py \
+  --config configs/env/scenario_s1_dongting.yaml \
+  --episodes 20 \
+  --seed 0 \
+  --output-dir outputs/results/s1_e1_comparison_20ep
 ```
+
+注意：当前 `run_cascade.py` 调用的是可运行的 `CASCADEMA3CScheduler` 框架入口，已经包含 action mask + Hungarian 匹配链路；完整 mA3C+MHSA+GNN 训练更新逻辑仍在后续 Phase 3 中继续接入。
 
 ## SwanLab 可视化
 
@@ -97,6 +120,28 @@ python experiments/run_baselines_only.py \
   --swanlab-mode cloud \
   --swanlab-project cascade-uav-scheduling \
   --swanlab-experiment s1-baseline-comparison
+```
+
+CASCADE 新方法云端记录：
+
+```bash
+python experiments/run_cascade.py \
+  --episodes 20 \
+  --use-swanlab \
+  --swanlab-mode cloud \
+  --swanlab-project cascade-uav-scheduling \
+  --swanlab-experiment s1-cascade
+```
+
+E1 主对比云端记录：
+
+```bash
+python experiments/run_e1_comparison.py \
+  --episodes 20 \
+  --use-swanlab \
+  --swanlab-mode cloud \
+  --swanlab-project cascade-uav-scheduling \
+  --swanlab-experiment e1-main-comparison
 ```
 
 服务器未登录或离线环境可用 offline 模式，仍会保留本地 SwanLab 日志和 PNG 图表：
