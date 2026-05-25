@@ -41,11 +41,72 @@ pip install -r requirements.txt
 # 运行仿真环境测试
 python -m unittest discover -s tests
 
-# 运行启发式 baseline
-python experiments/run_baselines_only.py
+# 运行启发式 baseline，并生成 JSON/CSV/PNG 图表
+python experiments/run_baselines_only.py --episodes 5 --seed 0
+
+# 指定输出目录
+python experiments/run_baselines_only.py \
+  --config configs/env/scenario_s1_dongting.yaml \
+  --episodes 5 \
+  --output-dir outputs/results/s1_baselines
 
 # 运行完整对比实验
 python experiments/run_e1_comparison.py
+```
+
+## 实验输入输出
+
+Baseline 评估入口为 `experiments/run_baselines_only.py`。默认输入为 `configs/env/scenario_s1_dongting.yaml`，输出目录为 `outputs/results/baselines_<timestamp>/`。
+
+每次运行会生成：
+
+- `summary.json`：按方法聚合后的指标。
+- `summary.csv`：便于论文表格整理的聚合指标。
+- `episodes.csv`：每个 episode 的原始结果。
+- `figures/completion_ratio.png`
+- `figures/tdsr.png`
+- `figures/total_reward.png`
+- `figures/rpdr_proxy.png`
+- `figures/baseline_radar.png`
+
+推荐先用本地输出确认结果，再把同一命令放到远程服务器上跑更多 episode。
+
+```bash
+python experiments/run_baselines_only.py \
+  --config configs/env/scenario_s1_dongting.yaml \
+  --episodes 20 \
+  --seed 0 \
+  --output-dir outputs/results/s1_baselines_20ep
+```
+
+## SwanLab 可视化
+
+推荐使用 SwanLab 管理正式实验记录。首次使用先安装依赖并登录：
+
+```bash
+pip install -r requirements.txt
+swanlab login
+```
+
+云端记录：
+
+```bash
+python experiments/run_baselines_only.py \
+  --episodes 20 \
+  --use-swanlab \
+  --swanlab-mode cloud \
+  --swanlab-project cascade-uav-scheduling \
+  --swanlab-experiment s1-baseline-comparison
+```
+
+服务器未登录或离线环境可用 offline 模式，仍会保留本地 SwanLab 日志和 PNG 图表：
+
+```bash
+python experiments/run_baselines_only.py \
+  --episodes 20 \
+  --use-swanlab \
+  --swanlab-mode offline \
+  --output-dir outputs/results/s1_swanlab_offline
 ```
 
 ## 文档

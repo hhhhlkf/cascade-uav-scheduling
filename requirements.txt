@@ -4,3 +4,5 @@ gymnasium>=0.29
 simpy>=4.1
 scipy>=1.10
 torch>=2.1
+matplotlib>=3.7
+swanlab>=0.5

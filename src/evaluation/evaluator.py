@@ -18,6 +18,15 @@ def evaluate_scheduler(
     episodes: int = 1,
     seed: int = 0,
 ) -> Dict[str, float]:
+    return evaluate_scheduler_details(env_config, scheduler_factory, episodes, seed)["summary"]
+
+
+def evaluate_scheduler_details(
+    env_config: Dict | str,
+    scheduler_factory: SchedulerFactory | Type[BaseScheduler],
+    episodes: int = 1,
+    seed: int = 0,
+) -> Dict[str, object]:
     results = []
     for episode_idx in range(episodes):
         env = CASCADEEnv(env_config)
@@ -35,6 +44,8 @@ def evaluate_scheduler(
                 action = np.zeros_like(action_mask, dtype=np.float32)
             obs, reward, terminated, truncated, info = env.step(action)
             total_reward += float(reward)
-        results.append(summarize_episode(info, total_reward))
-    return aggregate_metrics(results)
-
+        episode_summary = summarize_episode(info, total_reward)
+        episode_summary["episode"] = float(episode_idx)
+        episode_summary["seed"] = float(seed + episode_idx)
+        results.append(episode_summary)
+    return {"summary": aggregate_metrics(results), "episodes": results}
