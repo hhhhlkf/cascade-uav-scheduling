@@ -1,0 +1,10 @@
+name: e1_main_comparison
+scenario: configs/env/scenario_s1_dongting.yaml
+seeds: [0, 1, 2, 3, 4]
+episodes_per_seed: 1
+methods:
+  - greedy
+  - min_load
+  - round_robin
+  - heft
+

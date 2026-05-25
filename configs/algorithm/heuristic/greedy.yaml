@@ -1,0 +1,4 @@
+name: greedy
+type: heuristic
+class_path: src.algorithms.heuristic.GreedyScheduler
+

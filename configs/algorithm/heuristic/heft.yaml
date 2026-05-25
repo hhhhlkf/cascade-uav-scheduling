@@ -1,0 +1,4 @@
+name: heft
+type: heuristic
+class_path: src.algorithms.heuristic.HEFTScheduler
+

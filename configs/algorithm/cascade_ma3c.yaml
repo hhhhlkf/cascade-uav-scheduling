@@ -1,0 +1,10 @@
+name: cascade_ma3c
+type: rl
+class_path: src.algorithms.cascade.ma3c_trainer.CASCADEMA3CScheduler
+hyperparameters:
+  gamma: 0.99
+  gae_lambda: 0.95
+  entropy_coef: 0.01
+  actor_lr: 0.0003
+  critic_lr: 0.001
+  n_steps: 128
