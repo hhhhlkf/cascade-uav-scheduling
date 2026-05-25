@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/d/ProgramData/anaconda3/python -c \"import PyPDF2; print\\('ok'\\)\")",
+      "Bash(/d/ProgramData/anaconda3/python -m pip install PyPDF2 -q)",
+      "Bash(powershell.exe *)"
+    ]
+  }
+}
