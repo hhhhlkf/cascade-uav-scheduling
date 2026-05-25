@@ -6,44 +6,24 @@
 
 实验代码运行在远程 GPU 服务器上，不在本地执行。
 
-### SSH 连接指令
+> SSH 连接信息存储在 `ssh-config.local.md`（仅本地，已 gitignore）。
+
+### 远程工作目录
+
+`/root/autodl-tmp/code/cascade-uav-scheduling/`
+
+### 远程环境初始化（首次）
 
 ```bash
-# SSH 连接 (使用以下模板，填入实际信息后取消注释)
-# ssh -p <SSH端口> <用户名>@<服务器IP>
+# 1. 安装 uv（如未安装）
+which uv || curl -LsSf https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env  # 或 source $HOME/.cargo/env
 
-# 示例 (AutoDL):
-# ssh -p 12345 root@region-1.autodl.com
-```
-
-### 连接信息（待填写）
-
-| 项目 | 值 |
-|------|-----|
-| **SSH 地址** | `<服务器IP或域名>` |
-| **SSH 端口** | `<端口号>` |
-| **用户名** | `<用户名，通常为 root>` |
-| **密码** | `<登录密码>` |
-| **工作目录** | `~/autodl-tmp/code/scheduling-rl/` |
-
-### 免密登录配置 (可选)
-
-```bash
-# 本地生成密钥（如已有则跳过）
-# ssh-keygen -t rsa -b 4096
-
-# 上传公钥到远程服务器
-# ssh-copy-id -p <SSH端口> <用户名>@<服务器IP>
-```
-
-### 远程环境初始化
-
-```bash
-# SSH 登录后
-cd ~/autodl-tmp/code/
-git clone <本仓库地址> scheduling-rl
-cd scheduling-rl
-pip install -r requirements.txt
+# 2. 使用 uv 创建虚拟环境并安装依赖
+cd /root/autodl-tmp/code/cascade-uav-scheduling
+uv venv --python 3.10
+source .venv/bin/activate
+uv pip install -r requirements.txt
 ```
 
 ### 远程运行实验
