@@ -6,7 +6,7 @@
 
 实验代码运行在远程 GPU 服务器上，不在本地执行。
 
-> SSH 连接信息存储在 `ssh-config.local.md`（仅本地，已 gitignore）。
+> SSH 连接信息存储在 `ssh-config.local`（仅本地，已 gitignore）。
 
 ### 远程工作目录
 

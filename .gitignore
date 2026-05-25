@@ -26,7 +26,6 @@ checkpoints/
 # Environment
 .env
 *.local
-ssh-config.local.md
 
 # OS
 .DS_Store
