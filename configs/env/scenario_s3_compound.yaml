@@ -1,0 +1,39 @@
+defaults:
+  - base
+
+scenario:
+  name: s3_compound
+  grid_size_x: 10000
+  grid_size_y: 10000
+  num_civilians: 200
+  num_civilian_hotspots: 6
+  num_breach_points: 8
+  water_level_mean: 3.0
+  task_count: 80
+  dag_depth_max: 8
+  dag_width_max: 10
+  comm_failure_rate: 0.35
+  uav_fault_probability: 0.12
+  simulation_duration_s: 14400
+  emergency_injections:
+    - at_s: 3600
+      count: 2
+      task_type: I2
+      priority: 10
+      deadline_s: 180
+    - at_s: 7200
+      count: 1
+      task_type: C1
+      priority: 9
+      deadline_s: 300
+    - at_s: 9000
+      count: 2
+      task_type: F1
+      priority: 10
+      deadline_s: 240
+  uav_type_distribution:
+    UAV-V: 5
+    UAV-M: 3
+    UAV-H: 2
+    UAV-C: 4
+    UAV-R: 4

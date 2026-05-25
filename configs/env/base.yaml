@@ -1,0 +1,22 @@
+env:
+  max_steps: 200
+  step_seconds: 30
+  max_ready_tasks: 16
+  seed: 0
+reward:
+  lambda_load: 0.15
+  lambda_overload: 0.25
+  lambda_latency: 0.10
+  lambda_deadline: 0.30
+  lambda_priority: 0.20
+network:
+  command_vehicle_id: COMMAND
+  command_vehicle_position: [0.0, 0.0, 0.0]
+  wifi_range_m: 500.0
+  lora_range_m: 10000.0
+  wifi_bandwidth_mbps: 600.0
+  lora_bandwidth_mbps: 0.08
+  base_latency_ms: 4.0
+  hop_latency_ms: 5.0
+  rssi_threshold_dbm: -92.0
+

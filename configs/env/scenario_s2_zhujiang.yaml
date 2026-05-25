@@ -1,0 +1,34 @@
+defaults:
+  - base
+
+scenario:
+  name: s2_zhujiang
+  grid_size_x: 8000
+  grid_size_y: 6000
+  num_civilians: 150
+  num_civilian_hotspots: 5
+  num_breach_points: 5
+  water_level_mean: 2.4
+  task_count: 50
+  dag_depth_max: 7
+  dag_width_max: 8
+  comm_failure_rate: 0.25
+  uav_fault_probability: 0.08
+  simulation_duration_s: 10800
+  emergency_injections:
+    - at_s: 2700
+      count: 2
+      task_type: I2
+      priority: 10
+      deadline_s: 150
+    - at_s: 7200
+      count: 1
+      task_type: F1
+      priority: 10
+      deadline_s: 240
+  uav_type_distribution:
+    UAV-V: 4
+    UAV-M: 3
+    UAV-H: 2
+    UAV-C: 3
+    UAV-R: 2

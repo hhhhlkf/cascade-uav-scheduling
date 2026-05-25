@@ -1,0 +1,39 @@
+defaults:
+  - base
+
+scenario:
+  name: s1_dongting
+  grid_size_x: 5000
+  grid_size_y: 5000
+  num_civilians: 80
+  num_civilian_hotspots: 3
+  num_breach_points: 3
+  water_level_mean: 1.8
+  task_count: 30
+  dag_depth_max: 5
+  dag_width_max: 6
+  comm_failure_rate: 0.10
+  uav_fault_probability: 0.03
+  simulation_duration_s: 7200
+  emergency_injections:
+    - at_s: 1800
+      count: 1
+      task_type: I2
+      priority: 10
+      deadline_s: 120
+    - at_s: 3600
+      count: 1
+      task_type: I2
+      priority: 10
+      deadline_s: 120
+    - at_s: 5400
+      count: 1
+      task_type: I2
+      priority: 10
+      deadline_s: 120
+  uav_type_distribution:
+    UAV-V: 3
+    UAV-M: 2
+    UAV-H: 1
+    UAV-C: 2
+    UAV-R: 2
