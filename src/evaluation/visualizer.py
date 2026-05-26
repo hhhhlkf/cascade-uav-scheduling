@@ -11,18 +11,23 @@ METRIC_LABELS = {
     "rpdr_proxy_mean": "RPDR Proxy",
     "completed_tasks_mean": "Completed Tasks",
     "timed_out_tasks_mean": "Timed-out Tasks",
+    "makespan_s_mean": "Makespan (s)",
+    "atct_s_mean": "ATCT (s)",
+    "gpu_util_mean_mean": "GPU Utilization Mean",
+    "gpu_util_std_mean": "GPU Utilization Std",
+    "memory_util_mean_mean": "Memory Utilization Mean",
 }
 
 PALETTE = ["#2563eb", "#16a34a", "#f97316", "#dc2626", "#7c3aed", "#0891b2", "#db2777"]
 
 
 EPISODE_METRICS = [
+    "makespan_s",
+    "atct_s",
+    "gpu_util_mean",
+    "gpu_util_std",
+    "memory_util_mean",
     "total_reward",
-    "completion_ratio",
-    "tdsr",
-    "rpdr_proxy",
-    "completed_tasks",
-    "timed_out_tasks",
 ]
 
 
@@ -52,6 +57,10 @@ def plot_baseline_report(
         _plot_metric_bars(summary, "tdsr_mean", figures_dir / "tdsr.png"),
         _plot_metric_bars(summary, "total_reward_mean", figures_dir / "total_reward.png"),
         _plot_metric_bars(summary, "rpdr_proxy_mean", figures_dir / "rpdr_proxy.png"),
+        _plot_metric_bars(summary, "makespan_s_mean", figures_dir / "makespan.png"),
+        _plot_metric_bars(summary, "atct_s_mean", figures_dir / "atct.png"),
+        _plot_metric_bars(summary, "gpu_util_mean_mean", figures_dir / "gpu_util_mean.png"),
+        _plot_metric_bars(summary, "memory_util_mean_mean", figures_dir / "memory_util_mean.png"),
         _plot_radar(summary, figures_dir / "baseline_radar.png"),
     ]
     if episodes_by_method:

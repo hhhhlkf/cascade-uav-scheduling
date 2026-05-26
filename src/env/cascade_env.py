@@ -76,6 +76,8 @@ class CASCADEEnv(gym.Env):
         self.network: MeshNetworkSimulator
         self.max_tasks_total = 1
         self.max_nodes = 1
+        self.max_regions = 1
+        self.current_region_id = "R0"
         self._triggered_emergencies: set[int] = set()
         self._faulted_uav_ids: set[str] = set()
         self._build_world()
@@ -101,7 +103,8 @@ class CASCADEEnv(gym.Env):
         return obs, self._info()
 
     def step(self, action: np.ndarray):
-        ready_tasks = self.task_manager.get_ready_tasks(self.max_ready_tasks)
+        self._select_current_region()
+        ready_tasks = self.task_manager.get_ready_tasks(self.max_ready_tasks, region_id=self.current_region_id)
         mask = self.get_action_mask()
         assignments = decode_assignment_matrix(np.asarray(action, dtype=np.float32), mask)
         invalid_count = 0
@@ -126,8 +129,9 @@ class CASCADEEnv(gym.Env):
         timed_out = self.task_manager.timeout_overdue(self.sim_time_s)
         events = self._maybe_inject_events()
         self.network.update_topology([uav.uav for uav in self.uavs])
+        self._select_current_region()
 
-        next_ready = self.task_manager.get_ready_tasks(self.max_ready_tasks)
+        next_ready = self.task_manager.get_ready_tasks(self.max_ready_tasks, region_id=self.current_region_id)
         reward, reward_parts = compute_reward(
             self.uavs,
             self.network,
@@ -152,7 +156,8 @@ class CASCADEEnv(gym.Env):
         return obs, reward, terminated, truncated, info
 
     def get_action_mask(self) -> np.ndarray:
-        ready_tasks = self.task_manager.get_ready_tasks(self.max_ready_tasks)
+        self._select_current_region()
+        ready_tasks = self.task_manager.get_ready_tasks(self.max_ready_tasks, region_id=self.current_region_id)
         return compute_action_mask(ready_tasks, self.uavs, self.network, self.max_ready_tasks)
 
     def _build_world(self) -> None:
@@ -161,6 +166,8 @@ class CASCADEEnv(gym.Env):
         self.task_manager = TaskManager(self.scenario.tasks)
         self.network = MeshNetworkSimulator(self.scenario.topo_config)
         self.network.update_topology([uav.uav for uav in self.uavs])
+        self.max_regions = max(len(self.scenario.regions), 1)
+        self.current_region_id = self.scenario.regions[0].region_id if self.scenario.regions else "R0"
         planned_emergencies = sum(
             int(item.get("count", 1)) for item in self.config.get("scenario", {}).get("emergency_injections", [])
         )
@@ -243,11 +250,13 @@ class CASCADEEnv(gym.Env):
                 0.0,
             ),
             data_size_mb=float(injection.get("data_size_mb", 80.0)),
+            region_id=self.current_region_id,
             required_uav_types=required_types,
         )
 
     def _observe(self) -> Dict[str, np.ndarray]:
-        ready_tasks = self.task_manager.get_ready_tasks(self.max_ready_tasks)
+        self._select_current_region()
+        ready_tasks = self.task_manager.get_ready_tasks(self.max_ready_tasks, region_id=self.current_region_id)
         task_features = np.zeros((self.max_ready_tasks, 8), dtype=np.float32)
         priority_features = np.zeros((self.max_ready_tasks, 2), dtype=np.float32)
         task_mask = np.zeros((self.max_ready_tasks,), dtype=np.float32)
@@ -265,6 +274,7 @@ class CASCADEEnv(gym.Env):
 
         node_order = [self.network.command_vehicle_id] + [uav.uav_id for uav in self.uavs]
         network_adj = self.network.adjacency_matrix(node_order)
+        multihop_features = self.network.multihop_feature_matrix([uav.uav_id for uav in self.uavs])
         task_ids = list(self.task_manager.tasks.keys())
         task_dag_adj = self.task_manager.task_dag_adjacency(task_ids)
         padded_dag = np.zeros((self.max_tasks_total, self.max_tasks_total), dtype=np.float32)
@@ -273,6 +283,8 @@ class CASCADEEnv(gym.Env):
             "task_features": task_features,
             "uav_features": uav_features,
             "network_adj": network_adj.astype(np.float32),
+            "multihop_features": multihop_features.astype(np.float32),
+            "current_region_features": self._current_region_feature(),
             "task_dag_adj": padded_dag,
             "task_dag_mask": task_mask,
             "priority_features": priority_features,
@@ -285,6 +297,8 @@ class CASCADEEnv(gym.Env):
                 "task_features": spaces.Box(0.0, np.inf, shape=(self.max_ready_tasks, 8), dtype=np.float32),
                 "uav_features": spaces.Box(0.0, np.inf, shape=(len(self.uavs), 10), dtype=np.float32),
                 "network_adj": spaces.Box(0.0, 1.0, shape=(self.max_nodes, self.max_nodes), dtype=np.float32),
+                "multihop_features": spaces.Box(0.0, 1.0, shape=(len(self.uavs), 4), dtype=np.float32),
+                "current_region_features": spaces.Box(0.0, 1.0, shape=(7,), dtype=np.float32),
                 "task_dag_adj": spaces.Box(0.0, 1.0, shape=(self.max_tasks_total, self.max_tasks_total), dtype=np.float32),
                 "task_dag_mask": spaces.Box(0.0, 1.0, shape=(self.max_ready_tasks,), dtype=np.float32),
                 "priority_features": spaces.Box(0.0, 1.0, shape=(self.max_ready_tasks, 2), dtype=np.float32),
@@ -300,13 +314,61 @@ class CASCADEEnv(gym.Env):
         return {
             "sim_time_s": self.sim_time_s,
             "step_count": self.step_count,
+            "current_region": self.current_region_id,
             "completed_tasks": len(completed),
             "timed_out_tasks": len(self.task_manager.timed_out_tasks()),
-            "ready_tasks": len(self.task_manager.get_ready_tasks()),
+            "ready_tasks": len(self.task_manager.get_ready_tasks(region_id=self.current_region_id)),
             "tdsr": len(on_time) / max(len(deadline_tasks), 1),
             "rpdr_proxy": min(len(rescue_completed) / max(float(self.scenario.metadata.get("num_civilians", 1)), 1.0), 1.0),
             "dag_stats": self.task_manager.get_dag_stats(),
+            **self.get_episode_metrics(),
         }
 
     def _simulation_duration_s(self) -> float:
         return float(self.scenario.metadata.get("simulation_duration_s", self.max_steps * self.step_seconds))
+
+    def get_episode_metrics(self) -> Dict[str, float]:
+        completed = self.task_manager.completed_tasks()
+        durations = [
+            task.completion_time_s - task.start_time_s
+            for task in completed
+            if task.start_time_s is not None and task.completion_time_s is not None
+        ]
+        starts = [task.start_time_s for task in completed if task.start_time_s is not None]
+        finishes = [task.completion_time_s for task in completed if task.completion_time_s is not None]
+        metrics: Dict[str, float] = {
+            "makespan_s": float(max(finishes) - min(starts)) if starts and finishes else 0.0,
+            "atct_s": float(np.mean(durations)) if durations else 0.0,
+            "gpu_util_mean": float(np.mean([uav.mean_gpu_utilization() for uav in self.uavs])) if self.uavs else 0.0,
+            "gpu_util_std": float(np.std([uav.mean_gpu_utilization() for uav in self.uavs])) if self.uavs else 0.0,
+            "memory_util_mean": float(np.mean([uav.mean_memory_utilization() for uav in self.uavs])) if self.uavs else 0.0,
+        }
+        for prefix in ("A", "P", "I", "F", "C"):
+            prefix_durations = [
+                task.completion_time_s - task.start_time_s
+                for task in completed
+                if task.task_type.startswith(prefix)
+                and task.start_time_s is not None
+                and task.completion_time_s is not None
+            ]
+            metrics[f"ptct_{prefix.lower()}_s"] = float(np.mean(prefix_durations)) if prefix_durations else 0.0
+        return metrics
+
+    def _select_current_region(self) -> None:
+        ready_regions = self.task_manager.regions_with_ready_tasks()
+        if not ready_regions:
+            return
+        if self.current_region_id in ready_regions:
+            return
+        region_ids = [region.region_id for region in self.scenario.regions] or ready_regions
+        for region_id in region_ids:
+            if region_id in ready_regions:
+                self.current_region_id = region_id
+                return
+        self.current_region_id = ready_regions[0]
+
+    def _current_region_feature(self) -> np.ndarray:
+        for region in self.scenario.regions:
+            if region.region_id == self.current_region_id:
+                return region.feature_vector()
+        return np.zeros((7,), dtype=np.float32)

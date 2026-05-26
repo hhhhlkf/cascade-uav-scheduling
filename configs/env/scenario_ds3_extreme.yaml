@@ -1,0 +1,29 @@
+defaults:
+  - base
+
+scenario:
+  name: ds3_extreme
+  distribution: DS3
+  disaster_area_km2: [64, 100]
+  flood_ratio: [0.6, 0.8]
+  building_density: [high]
+  civilian_density: [25, 50]
+  comm_failure_rate: [0.5, 0.9]
+  breach_risk_level: 3
+  terrain_roughness: [complex]
+  num_regions: [3, 5]
+  num_uavs_total: [12, 15]
+  uav_orin_8gb_ratio: [0.3, 0.5]
+  simulation_duration_s: 10800
+  uav_fault_probability: 0.30
+  emergency_injections:
+    - at_s: 2400
+      count: 2
+      task_type: A5
+      priority: 10
+      deadline_s: 600
+    - at_s: 3600
+      count: 1
+      task_type: F4
+      priority: 10
+      deadline_s: 900

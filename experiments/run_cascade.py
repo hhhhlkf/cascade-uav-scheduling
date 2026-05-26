@@ -39,7 +39,7 @@ def main() -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the CASCADE method.")
-    parser.add_argument("--config", default="configs/env/scenario_s1_dongting.yaml", help="Environment YAML config path.")
+    parser.add_argument("--config", default="configs/env/scenario_ds1_standard.yaml", help="Environment YAML config path.")
     parser.add_argument("--episodes", type=int, default=5, help="Episodes to evaluate CASCADE.")
     parser.add_argument("--seed", type=int, default=0, help="Base random seed.")
     parser.add_argument("--output-dir", default=None, help="Output directory. Defaults to outputs/results/cascade_<timestamp>.")

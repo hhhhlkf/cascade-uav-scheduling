@@ -7,7 +7,7 @@ def summarize_episode(info: Dict, total_reward: float) -> Dict[str, float]:
     completed = float(info.get("completed_tasks", 0))
     timed_out = float(info.get("timed_out_tasks", 0))
     total_seen = max(completed + timed_out + float(info.get("ready_tasks", 0)), 1.0)
-    return {
+    summary = {
         "total_reward": float(total_reward),
         "completed_tasks": completed,
         "timed_out_tasks": timed_out,
@@ -16,6 +16,21 @@ def summarize_episode(info: Dict, total_reward: float) -> Dict[str, float]:
         "rpdr_proxy": float(info.get("rpdr_proxy", 0.0)),
         "sim_time_s": float(info.get("sim_time_s", 0.0)),
     }
+    for key in (
+        "makespan_s",
+        "atct_s",
+        "ptct_a_s",
+        "ptct_p_s",
+        "ptct_i_s",
+        "ptct_f_s",
+        "ptct_c_s",
+        "gpu_util_mean",
+        "gpu_util_std",
+        "memory_util_mean",
+    ):
+        if key in info:
+            summary[key] = float(info[key])
+    return summary
 
 
 def aggregate_metrics(results: list[Dict[str, float]]) -> Dict[str, float]:

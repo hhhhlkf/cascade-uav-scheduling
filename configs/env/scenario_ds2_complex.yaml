@@ -1,0 +1,18 @@
+defaults:
+  - base
+
+scenario:
+  name: ds2_complex
+  distribution: DS2
+  disaster_area_km2: [40, 100]
+  flood_ratio: [0.45, 0.8]
+  building_density: [medium, high]
+  civilian_density: [15, 50]
+  comm_failure_rate: [0.3, 0.75]
+  breach_risk_level: [1, 3]
+  terrain_roughness: [hilly, complex]
+  num_regions: [3, 5]
+  num_uavs_total: [9, 15]
+  uav_orin_8gb_ratio: [0.25, 0.5]
+  simulation_duration_s: 9000
+  uav_fault_probability: 0.08

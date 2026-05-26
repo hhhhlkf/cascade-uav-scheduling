@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections import deque
+import heapq
 from math import log10
 from typing import Dict, Iterable, List, Tuple
 
@@ -48,6 +48,7 @@ class MeshNetworkSimulator:
                     connected=link.connected,
                     rssi_dbm=link.rssi_dbm,
                     mode=link.mode,
+                    distance_m=link.distance_m,
                 )
         return self.links
 
@@ -55,24 +56,53 @@ class MeshNetworkSimulator:
         return self.shortest_path_latency(node_id, self.command_vehicle_id) < float("inf")
 
     def shortest_path_latency(self, src_id: str, dst_id: str) -> float:
+        metrics = self.shortest_path_metrics(src_id, dst_id)
+        return float(metrics["latency_ms"])
+
+    def shortest_path_metrics(self, src_id: str, dst_id: str) -> Dict[str, float]:
         if src_id == dst_id:
-            return 0.0
-        queue = deque([(src_id, 0.0)])
-        visited = {src_id}
+            return {"latency_ms": 0.0, "hop_count": 0.0, "bottleneck_bw_mbps": 0.0, "has_direct_link": 1.0}
+        queue: list[tuple[float, str, int, float]] = [(0.0, src_id, 0, float("inf"))]
+        best_latency = {src_id: 0.0}
         while queue:
-            node, latency = queue.popleft()
+            latency, node, hops, bottleneck = heapq.heappop(queue)
+            if node == dst_id:
+                direct = self.links.get((src_id, dst_id))
+                return {
+                    "latency_ms": float(latency),
+                    "hop_count": float(hops),
+                    "bottleneck_bw_mbps": float(0.0 if bottleneck == float("inf") else bottleneck),
+                    "has_direct_link": float(bool(direct and direct.connected)),
+                }
+            if latency > best_latency.get(node, float("inf")):
+                continue
             for next_id in self.node_ids:
-                if next_id in visited:
-                    continue
                 link = self.links.get((node, next_id))
                 if not link or not link.connected:
                     continue
                 next_latency = latency + link.latency_ms + self.hop_latency_ms
-                if next_id == dst_id:
-                    return next_latency
-                visited.add(next_id)
-                queue.append((next_id, next_latency))
-        return float("inf")
+                if next_latency >= best_latency.get(next_id, float("inf")):
+                    continue
+                best_latency[next_id] = next_latency
+                heapq.heappush(queue, (next_latency, next_id, hops + 1, min(bottleneck, link.bandwidth_mbps)))
+        return {"latency_ms": float("inf"), "hop_count": float("inf"), "bottleneck_bw_mbps": 0.0, "has_direct_link": 0.0}
+
+    def multihop_feature_matrix(self, uav_ids: List[str]) -> np.ndarray:
+        features = np.zeros((len(uav_ids), 4), dtype=np.float32)
+        for idx, uav_id in enumerate(uav_ids):
+            metrics = self.shortest_path_metrics(uav_id, self.command_vehicle_id)
+            latency = metrics["latency_ms"]
+            hop_count = metrics["hop_count"]
+            features[idx] = np.asarray(
+                [
+                    0.0 if hop_count == float("inf") else min(hop_count / 5.0, 1.0),
+                    min(metrics["bottleneck_bw_mbps"] / max(self.wifi_bandwidth_mbps, 1e-6), 1.0),
+                    1.0 if latency == float("inf") else min(latency / 1000.0, 1.0),
+                    metrics["has_direct_link"],
+                ],
+                dtype=np.float32,
+            )
+        return features
 
     def get_link(self, src_id: str, dst_id: str) -> LinkQuality | None:
         return self.links.get((src_id, dst_id))
@@ -104,7 +134,7 @@ class MeshNetworkSimulator:
         propagation_ms = distance_m / 3e8 * 1000.0
         latency = self.base_latency_ms + propagation_ms + (1.0 / max(bandwidth, 1e-3) if connected else 1000.0)
         loss = float(np.clip(0.02 + (1.0 - degradation) * 0.35, 0.0, 1.0)) if connected else 1.0
-        return LinkQuality(src_id, dst_id, float(bandwidth), float(latency), loss, bool(connected), float(rssi), mode)
+        return LinkQuality(src_id, dst_id, float(bandwidth), float(latency), loss, bool(connected), float(rssi), mode, float(distance_m))
 
     def _rssi(self, distance_m: float) -> float:
         frequency_mhz = 2400.0
@@ -112,4 +142,3 @@ class MeshNetworkSimulator:
         tx_power_dbm = 23.0
         antenna_gain_db = 5.0
         return tx_power_dbm + antenna_gain_db - fspl_db
-

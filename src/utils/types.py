@@ -44,6 +44,35 @@ class ModalityType(str, Enum):
     MIXED = "MIXED"
 
 
+@dataclass
+class Region:
+    region_id: str
+    center: "Position"
+    area_km2: float
+    flood_ratio: float
+    building_density: str
+    civilian_density: float
+    comm_failure_rate: float
+    breach_risk_level: int
+    terrain_roughness: str
+
+    def feature_vector(self) -> np.ndarray:
+        density_map = {"low": 0.0, "medium": 0.5, "high": 1.0}
+        terrain_map = {"flat": 0.0, "hilly": 0.5, "complex": 1.0}
+        return np.asarray(
+            [
+                self.area_km2 / 100.0,
+                self.flood_ratio,
+                density_map.get(self.building_density, 0.5),
+                min(self.civilian_density / 50.0, 1.0),
+                self.comm_failure_rate,
+                self.breach_risk_level / 3.0,
+                terrain_map.get(self.terrain_roughness, 0.5),
+            ],
+            dtype=np.float32,
+        )
+
+
 @dataclass(frozen=True)
 class Position:
     x: float
@@ -104,6 +133,7 @@ class Task:
     arrival_time_s: float = 0.0
     target_position: Position = field(default_factory=lambda: Position(0.0, 0.0, 0.0))
     data_size_mb: float = 10.0
+    region_id: str = "R0"
     depends_on: List[str] = field(default_factory=list)
     depended_by: List[str] = field(default_factory=list)
     required_uav_types: List[UAVType] = field(default_factory=list)
@@ -159,6 +189,7 @@ class LinkQuality:
     connected: bool
     rssi_dbm: float
     mode: str
+    distance_m: float = 0.0
 
 
 @dataclass
@@ -170,6 +201,7 @@ class Scenario:
     uavs: List[UAV]
     tasks: List[Task]
     topo_config: Dict
+    regions: List[Region] = field(default_factory=list)
     metadata: Dict = field(default_factory=dict)
 
 
@@ -203,4 +235,3 @@ def add_dependency(tasks_by_id: Dict[str, Task], parent_id: str, child_id: str) 
 
 def ids(items: Sequence[object]) -> List[str]:
     return [getattr(item, "task_id", getattr(item, "uav_id", str(item))) for item in items]
-

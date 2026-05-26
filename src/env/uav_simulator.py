@@ -32,6 +32,8 @@ class UAVSimulator:
         self.uav = uav
         self._active: Dict[str, ActiveTask] = {}
         self.energy_consumed_wh = 0.0
+        self.gpu_util_samples: List[float] = []
+        self.memory_util_samples: List[float] = []
 
     @property
     def uav_id(self) -> str:
@@ -66,6 +68,7 @@ class UAVSimulator:
         if self.uav.status == UAVStatus.FAULTED:
             return []
         self._consume_energy(dt_s)
+        self._sample_utilization()
         completed: List[Task] = []
         for task_id, active in list(self._active.items()):
             active.remaining_s = max(0.0, active.remaining_s - dt_s)
@@ -97,6 +100,18 @@ class UAVSimulator:
         total = self.uav.resources_total.as_array()
         available = self.uav.resources_available.as_array()
         return float(np.mean(1.0 - np.divide(available, np.maximum(total, 1e-6))))
+
+    def mean_gpu_utilization(self) -> float:
+        return float(np.mean(self.gpu_util_samples)) if self.gpu_util_samples else 0.0
+
+    def mean_memory_utilization(self) -> float:
+        return float(np.mean(self.memory_util_samples)) if self.memory_util_samples else 0.0
+
+    def _sample_utilization(self) -> None:
+        total = self.uav.resources_total
+        available = self.uav.resources_available
+        self.gpu_util_samples.append(float(1.0 - available.gpu / max(total.gpu, 1e-6)))
+        self.memory_util_samples.append(float(1.0 - available.memory_gb / max(total.memory_gb, 1e-6)))
 
     def _consume_energy(self, dt_s: float) -> None:
         power = POWER_W.get(self.uav.status, 200.0)

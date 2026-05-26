@@ -15,10 +15,16 @@ class TaskManager:
         self.tasks: Dict[str, Task] = {task.task_id: task for task in tasks}
         self._refresh_ready(now_s=0.0)
 
-    def get_ready_tasks(self, limit: Optional[int] = None) -> List[Task]:
+    def get_ready_tasks(self, limit: Optional[int] = None, region_id: str | None = None) -> List[Task]:
         ready = [task for task in self.tasks.values() if task.status == TaskStatus.READY]
+        if region_id is not None:
+            ready = [task for task in ready if task.region_id == region_id]
         ready.sort(key=lambda item: (-item.priority, item.absolute_deadline_s, item.task_id))
         return ready[:limit] if limit else ready
+
+    def regions_with_ready_tasks(self) -> List[str]:
+        regions = sorted({task.region_id for task in self.tasks.values() if task.status == TaskStatus.READY})
+        return regions
 
     def schedule_task(self, task_id: str, uav_id: str, now_s: float) -> bool:
         task = self.tasks[task_id]
@@ -101,12 +107,17 @@ class TaskManager:
                 indegree[child] -= 1
                 if indegree[child] == 0:
                     queue.append(child)
-        return {
+        stats = {
             "num_tasks": float(len(self.tasks)),
             "critical_path_length": float(max(depth.values(), default=0)),
             "parallelism": float(len(self.tasks) / max(max(depth.values(), default=1), 1)),
             "is_dag": float(visited == len(self.tasks)),
         }
+        for prefix in ("A", "P", "I", "F", "C"):
+            stats[f"num_{prefix.lower()}_tasks"] = float(
+                sum(1 for task in self.tasks.values() if task.task_type.startswith(prefix))
+            )
+        return stats
 
     def _refresh_ready(self, now_s: float) -> None:
         completed = {task.task_id for task in self.tasks.values() if task.status == TaskStatus.COMPLETED}
