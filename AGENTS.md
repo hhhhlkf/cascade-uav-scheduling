@@ -53,3 +53,37 @@ uv pip install -r requirements.txt
 
 - `src/env/` 和 `configs/env/` 是项目源码与配置，不应被虚拟环境忽略规则误伤。
 - 提交前检查 `git status --short --ignored`，确认只跟踪应该入库的源码、配置、测试和文档。
+
+## 修改后同步要求
+
+每次完成代码、配置、测试或文档修改后，都需要执行以下同步流程：
+
+1. 本地验证优先运行：
+
+```bash
+python -m unittest discover -s tests
+python experiments/smoke_env.py
+```
+
+2. 检查待提交文件，避免提交本地隐私文件、大文件和实验输出：
+
+```bash
+git status --short --ignored
+```
+
+3. 将本次修改提交并推送到 GitHub：
+
+```bash
+git add <changed-source-files>
+git commit -m "<message>"
+git push origin master
+```
+
+4. 推送成功后，登录远程实验服务器并拉取最新版本：
+
+```bash
+cd /root/autodl-tmp/code/cascade-uav-scheduling
+git pull --ff-only origin master
+```
+
+如果远程服务器存在未提交本地改动，必须先确认来源与用途，不能直接覆盖。

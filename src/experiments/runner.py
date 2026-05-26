@@ -22,6 +22,8 @@ def run_scheduler_suite(
     swanlab_project: str = "cascade-uav-scheduling",
     swanlab_experiment: str = "experiment",
     swanlab_mode: str = "offline",
+    swanlab_workspace: str | None = None,
+    swanlab_load: str | None = None,
 ) -> Dict[str, Dict[str, float]]:
     output_path = ensure_output_dir(output_dir or _default_output_dir(default_output_prefix))
     summary = {}
@@ -32,11 +34,15 @@ def run_scheduler_suite(
         experiment_name=swanlab_experiment,
         mode=swanlab_mode,
         logdir=output_path / "swanlab",
+        workspace=swanlab_workspace,
+        load=swanlab_load,
         config={
             "scenario": config_path,
             "episodes": episodes,
             "seed": seed,
             "methods": list(methods),
+            "swanlab_mode": swanlab_mode,
+            "swanlab_workspace": swanlab_workspace,
         },
     )
     for step, (name, scheduler_cls) in enumerate(methods.items()):
@@ -59,4 +65,3 @@ def run_scheduler_suite(
 def _default_output_dir(prefix: str) -> Path:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return Path("outputs") / "results" / f"{prefix}_{timestamp}"
-
