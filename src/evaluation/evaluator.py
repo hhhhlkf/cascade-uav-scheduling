@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable, Dict, Type
+from typing import Callable, Dict, Mapping, Type
 
 import numpy as np
 
@@ -10,6 +10,7 @@ from src.evaluation.metrics import aggregate_metrics, summarize_episode
 
 
 SchedulerFactory = Callable[[int, int], BaseScheduler]
+EpisodeCallback = Callable[[Mapping[str, float]], None]
 
 
 def evaluate_scheduler(
@@ -28,6 +29,7 @@ def evaluate_scheduler_details(
     seed: int = 0,
     show_progress: bool = False,
     progress_desc: str | None = None,
+    episode_callback: EpisodeCallback | None = None,
 ) -> Dict[str, object]:
     results = []
     episode_iter = range(episodes)
@@ -55,4 +57,6 @@ def evaluate_scheduler_details(
         episode_summary["episode"] = float(episode_idx)
         episode_summary["seed"] = float(seed + episode_idx)
         results.append(episode_summary)
+        if episode_callback is not None:
+            episode_callback(episode_summary)
     return {"summary": aggregate_metrics(results), "episodes": results}

@@ -70,10 +70,11 @@ def run_scheduler_suite(
             seed=seed,
             show_progress=show_progress,
             progress_desc=f"{name} episodes",
+            episode_callback=lambda episode, method=name: swanlab.log_episode(method, episode),
         )
         summary[name] = result["summary"]
         episodes_by_method[name] = result["episodes"]
-        swanlab.log_summary(name, result["summary"], step=step)
+        swanlab.log_summary(name, result["summary"], step=episodes)
     figure_paths = plot_baseline_report(summary, output_path, episodes_by_method=episodes_by_method)
     write_json(output_path / "summary.json", summary)
     write_summary_csv(output_path / "summary.csv", summary)

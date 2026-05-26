@@ -56,10 +56,25 @@ class SwanLabLogger:
                 "'swanlab login -k <YOUR_SWANLAB_API_KEY>' on the remote server."
             ) from exc
 
-    def log_summary(self, method: str, metrics: Mapping[str, float], step: int) -> None:
+    def log_episode(self, method: str, metrics: Mapping[str, float]) -> None:
         if not self.enabled or self._swanlab is None:
             return
-        payload = {f"{method}/{key}": float(value) for key, value in metrics.items()}
+        step = int(metrics.get("episode", 0.0)) + 1
+        excluded = {"episode", "seed"}
+        payload = {
+            f"episode/{method}/{key}": float(value)
+            for key, value in metrics.items()
+            if key not in excluded
+        }
+        self._swanlab.log(payload, step=step)
+
+    def log_summary(self, method: str, metrics: Mapping[str, float], step: int | None = None) -> None:
+        if not self.enabled or self._swanlab is None:
+            return
+        payload = {f"summary/{method}/{key}": float(value) for key, value in metrics.items()}
+        if step is None:
+            self._swanlab.log(payload)
+            return
         self._swanlab.log(payload, step=step)
 
     def finish(self) -> None:
