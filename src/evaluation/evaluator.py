@@ -26,9 +26,16 @@ def evaluate_scheduler_details(
     scheduler_factory: SchedulerFactory | Type[BaseScheduler],
     episodes: int = 1,
     seed: int = 0,
+    show_progress: bool = False,
+    progress_desc: str | None = None,
 ) -> Dict[str, object]:
     results = []
-    for episode_idx in range(episodes):
+    episode_iter = range(episodes)
+    if show_progress:
+        from tqdm.auto import tqdm
+
+        episode_iter = tqdm(episode_iter, desc=progress_desc or "episodes", leave=False)
+    for episode_idx in episode_iter:
         env = CASCADEEnv(env_config)
         obs, info = env.reset(seed=seed + episode_idx)
         scheduler = scheduler_factory(env.max_ready_tasks, len(env.uavs))

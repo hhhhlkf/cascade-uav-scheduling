@@ -36,6 +36,8 @@ def main() -> None:
         swanlab_mode=args.swanlab_mode,
         swanlab_workspace=args.swanlab_workspace,
         swanlab_load=args.swanlab_load,
+        require_gpu=not args.no_require_gpu,
+        show_progress=not args.no_progress,
     )
     print(json.dumps(summary, indent=2, ensure_ascii=False, sort_keys=True))
 
@@ -43,17 +45,19 @@ def main() -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run E1 main comparison: CASCADE vs baselines.")
     parser.add_argument("--config", default="configs/env/scenario_s1_dongting.yaml", help="Environment YAML config path.")
-    parser.add_argument("--episodes", type=int, default=5, help="Episodes per method.")
+    parser.add_argument("--episodes", type=int, default=100000, help="Episodes per method.")
     parser.add_argument("--seed", type=int, default=0, help="Base random seed.")
     parser.add_argument("--output-dir", default=None, help="Output directory. Defaults to outputs/results/e1_main_comparison_<timestamp>.")
     parser.add_argument("--use-swanlab", action="store_true", help="Enable SwanLab experiment logging.")
     parser.add_argument("--swanlab-project", default="cascade-uav-scheduling", help="SwanLab project name.")
-    parser.add_argument("--swanlab-workspace", default=None, help="SwanLab workspace name, for example: Linexus.")
+    parser.add_argument("--swanlab-workspace", default="Linexus", help="SwanLab workspace name, for example: Linexus.")
     parser.add_argument("--swanlab-experiment", default="e1-main-comparison", help="SwanLab experiment name.")
     parser.add_argument("--swanlab-load", default=None, help="Optional SwanLab load config path.")
+    parser.add_argument("--no-require-gpu", action="store_true", help="Allow running without CUDA. Use only for local debugging.")
+    parser.add_argument("--no-progress", action="store_true", help="Disable tqdm progress bars.")
     parser.add_argument(
         "--swanlab-mode",
-        default="offline",
+        default="cloud",
         choices=["cloud", "local", "offline", "disabled"],
         help="SwanLab mode. Use cloud after swanlab login; offline is safe for servers.",
     )

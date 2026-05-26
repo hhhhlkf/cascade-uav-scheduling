@@ -9,6 +9,7 @@ from src.evaluation import evaluate_scheduler_details
 from src.evaluation.output import ensure_output_dir, write_episode_csv, write_json, write_summary_csv
 from src.evaluation.swanlab_logger import SwanLabLogger
 from src.evaluation.visualizer import plot_baseline_report
+from src.utils.gpu import require_cuda_device
 
 
 def run_scheduler_suite(
@@ -24,8 +25,17 @@ def run_scheduler_suite(
     swanlab_mode: str = "offline",
     swanlab_workspace: str | None = None,
     swanlab_load: str | None = None,
+    require_gpu: bool = True,
+    show_progress: bool = True,
 ) -> Dict[str, Dict[str, float]]:
     output_path = ensure_output_dir(output_dir or _default_output_dir(default_output_prefix))
+    device_info = require_cuda_device() if require_gpu else {}
+    if device_info:
+        print(
+            "GPU ready: "
+            f"{device_info['device_name']} "
+            f"(torch={device_info['torch_version']}, cuda={device_info['cuda_version']})"
+        )
     summary = {}
     episodes_by_method = {}
     swanlab = SwanLabLogger(
@@ -43,14 +53,28 @@ def run_scheduler_suite(
             "methods": list(methods),
             "swanlab_mode": swanlab_mode,
             "swanlab_workspace": swanlab_workspace,
+            "device": device_info,
         },
     )
-    for step, (name, scheduler_cls) in enumerate(methods.items()):
-        result = evaluate_scheduler_details(config_path, scheduler_cls, episodes=episodes, seed=seed)
+    method_items = list(methods.items())
+    method_iter = method_items
+    if show_progress:
+        from tqdm.auto import tqdm
+
+        method_iter = tqdm(method_items, desc="Methods", leave=True)
+    for step, (name, scheduler_cls) in enumerate(method_iter):
+        result = evaluate_scheduler_details(
+            config_path,
+            scheduler_cls,
+            episodes=episodes,
+            seed=seed,
+            show_progress=show_progress,
+            progress_desc=f"{name} episodes",
+        )
         summary[name] = result["summary"]
         episodes_by_method[name] = result["episodes"]
         swanlab.log_summary(name, result["summary"], step=step)
-    figure_paths = plot_baseline_report(summary, output_path)
+    figure_paths = plot_baseline_report(summary, output_path, episodes_by_method=episodes_by_method)
     write_json(output_path / "summary.json", summary)
     write_summary_csv(output_path / "summary.csv", summary)
     write_episode_csv(output_path / "episodes.csv", episodes_by_method)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Mapping
+from typing import Iterable, Mapping
 
 
 METRIC_LABELS = {
@@ -16,7 +16,21 @@ METRIC_LABELS = {
 PALETTE = ["#2563eb", "#16a34a", "#f97316", "#dc2626", "#7c3aed", "#0891b2", "#db2777"]
 
 
-def plot_baseline_report(summary: Mapping[str, Mapping[str, float]], output_dir: str | Path) -> list[Path]:
+EPISODE_METRICS = [
+    "total_reward",
+    "completion_ratio",
+    "tdsr",
+    "rpdr_proxy",
+    "completed_tasks",
+    "timed_out_tasks",
+]
+
+
+def plot_baseline_report(
+    summary: Mapping[str, Mapping[str, float]],
+    output_dir: str | Path,
+    episodes_by_method: Mapping[str, Iterable[Mapping[str, float]]] | None = None,
+) -> list[Path]:
     import matplotlib.pyplot as plt
 
     figures_dir = Path(output_dir) / "figures"
@@ -40,6 +54,13 @@ def plot_baseline_report(summary: Mapping[str, Mapping[str, float]], output_dir:
         _plot_metric_bars(summary, "rpdr_proxy_mean", figures_dir / "rpdr_proxy.png"),
         _plot_radar(summary, figures_dir / "baseline_radar.png"),
     ]
+    if episodes_by_method:
+        paths.extend(
+            [
+                _plot_episode_grid(episodes_by_method, figures_dir / "episode_metric_trends.png", cumulative=False),
+                _plot_episode_grid(episodes_by_method, figures_dir / "episode_cumulative_mean_trends.png", cumulative=True),
+            ]
+        )
     return paths
 
 
@@ -94,3 +115,53 @@ def _plot_radar(summary: Mapping[str, Mapping[str, float]], path: Path) -> Path:
     plt.close(fig)
     return path
 
+
+def _plot_episode_grid(
+    episodes_by_method: Mapping[str, Iterable[Mapping[str, float]]],
+    path: Path,
+    cumulative: bool,
+) -> Path:
+    import matplotlib.pyplot as plt
+
+    title_prefix = "Cumulative Mean" if cumulative else "Episode"
+    fig, axes = plt.subplots(2, 3, figsize=(15, 8.5), sharex=False)
+    axes_flat = axes.ravel()
+    for metric_idx, metric in enumerate(EPISODE_METRICS):
+        ax = axes_flat[metric_idx]
+        for method_idx, (method, episodes) in enumerate(episodes_by_method.items()):
+            episode_list = sorted(list(episodes), key=lambda item: float(item.get("episode", 0.0)))
+            if not episode_list:
+                continue
+            x_values = [int(item.get("episode", idx)) + 1 for idx, item in enumerate(episode_list)]
+            y_values = [float(item.get(metric, 0.0)) for item in episode_list]
+            if cumulative:
+                y_values = _cumulative_mean(y_values)
+            ax.plot(
+                x_values,
+                y_values,
+                marker="o",
+                markersize=3.2,
+                linewidth=1.8,
+                color=PALETTE[method_idx % len(PALETTE)],
+                label=method,
+            )
+        ax.set_title(METRIC_LABELS.get(f"{metric}_mean", metric.replace("_", " ").title()))
+        ax.set_xlabel("Episode")
+        ax.set_ylabel(METRIC_LABELS.get(f"{metric}_mean", metric.replace("_", " ").title()))
+    handles, labels = axes_flat[0].get_legend_handles_labels()
+    if handles:
+        fig.legend(handles, labels, loc="upper center", ncol=min(len(labels), 5), frameon=False)
+    fig.suptitle(f"{title_prefix} Metric Trends", fontsize=14, fontweight="bold", y=1.02)
+    fig.tight_layout()
+    fig.savefig(path, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    return path
+
+
+def _cumulative_mean(values: list[float]) -> list[float]:
+    running = []
+    total = 0.0
+    for idx, value in enumerate(values, start=1):
+        total += value
+        running.append(total / idx)
+    return running

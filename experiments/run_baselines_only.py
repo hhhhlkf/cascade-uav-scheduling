@@ -34,6 +34,8 @@ def main() -> None:
         swanlab_mode=args.swanlab_mode,
         swanlab_workspace=args.swanlab_workspace,
         swanlab_load=args.swanlab_load,
+        require_gpu=not args.no_require_gpu,
+        show_progress=not args.no_progress,
     )
     print(json.dumps(summary, indent=2, ensure_ascii=False, sort_keys=True))
 
@@ -49,6 +51,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--swanlab-workspace", default=None, help="SwanLab workspace name, for example: Linexus.")
     parser.add_argument("--swanlab-experiment", default="baseline-comparison", help="SwanLab experiment name.")
     parser.add_argument("--swanlab-load", default=None, help="Optional SwanLab load config path.")
+    parser.add_argument("--no-require-gpu", action="store_true", help="Allow running without CUDA. Use only for local debugging.")
+    parser.add_argument("--no-progress", action="store_true", help="Disable tqdm progress bars.")
     parser.add_argument(
         "--swanlab-mode",
         default="offline",
