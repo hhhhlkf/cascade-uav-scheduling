@@ -48,6 +48,8 @@
 
 ### 2.1 设计原则
 
+**实现状态（2026-05-27）**：部分完成。模块化、Gymnasium 接口、YAML 配置和纯仿真数据已落地；SimPy 当前仅初始化环境对象，主体推进仍是固定步长事件循环，尚未完全改为 SimPy 离散事件调度。
+
 - **离散事件驱动**：使用 SimPy 离散事件仿真引擎，适合建模任务到达、调度决策、任务执行、通信变化等离散事件
 - **模块化架构**：场景生成器、无人机模拟器、通信网络模拟器、任务管理器四个核心模块独立可替换
 - **Gymnasium 兼容接口**：对外暴露 `reset()` / `step(action)` 标准 RL 接口，兼容 Stable-Baselines3 / RLlib / Tianshou 等主流 RL 框架
@@ -55,6 +57,8 @@
 - **纯仿真数据**：场景参数与任务链由参数化生成器产生，不依赖外部数据集；评估指标聚焦于任务完成时效和资源利用效率
 
 ### 2.2 技术选型
+
+**实现状态（2026-05-27）**：部分完成。Gymnasium、PyTorch、SciPy Hungarian、YAML 配置、自定义通信仿真已接入；PyTorch Geometric、OR-Tools、Hydra/OmegaConf、MLflow/TensorBoard 尚未接入，当前实验追踪使用 SwanLab。
 
 | 组件 | 选型 | 理由 |
 |------|------|------|
@@ -69,7 +73,20 @@
 
 ### 2.3 核心模块详设
 
+**实现状态总览（2026-05-27）**
+
+| 模块/步骤 | 状态 | 当前落地位置 | 说明 |
+|-----------|------|--------------|------|
+| 2.3.1 `ScenarioGenerator` | 部分完成 | `src/env/scenario_generator.py`, `configs/env/scenario_ds*.yaml` | 已支持 DS1/DS2/DS3、7 维参数采样、2~5 区域、每区域 5~15 DAG 任务链、A/P/I/F/C 触发规则、UAV 编队生成；建筑/道路/障碍物与高程模型仍是简化占位。 |
+| 2.3.2 `UAVSimulator` | 部分完成 | `src/env/uav_simulator.py` | 已支持任务分配、飞行耗时、资源占用/释放、电池消耗、状态切换、故障中断、GPU/显存利用率采样；转弯半径、风扰动、传感器故障未细化。 |
+| 2.3.3 `MeshNetworkSimulator` | 部分完成 | `src/env/network_simulator.py` | 已支持距离驱动链路、RSS、带宽、延迟、通信损毁、多跳最短路径、瓶颈带宽/端到端延迟特征；terrain LoS 概率、K=3 备选路径和完整链路边属性矩阵未完成。 |
+| 2.3.4 `TaskManager` | 部分完成 | `src/env/task_manager.py`, `src/env/scenario_generator.py` | 任务链生成在 `ScenarioGenerator` 中完成；`TaskManager` 已支持 DAG 依赖、READY 解锁、调度、完成、超时、抢占、紧急注入和 DAG 统计；`get_pending_count()` 尚未实现。 |
+| 2.3.5 `CASCADEEnv` | 部分完成 | `src/env/cascade_env.py`, `src/env/action_mask.py`, `src/env/reward.py` | 已支持 `reset()`/`step()`/`get_action_mask()`、区域化 ready task、连续动作矩阵、动作掩码、5 项 reward、观测中的区域/多跳/DAG/UAV 特征、episode 指标；尚未完全 SimPy 事件驱动，动作离散化当前使用贪心解码而非统一 Hungarian 后处理。 |
+| 2.3.6 Episode/Step 输入输出 | 部分完成 | `experiments/smoke_env.py`, `experiments/run_cascade.py`, `tests/test_env/` | 单 episode step/reset、DS1 小规模实验、指标输出与图表生成已验证；完整 10,000 episode 训练流程属于 Phase 3，尚未实现。 |
+
 #### 2.3.1 场景生成器 (`ScenarioGenerator`)
+
+**实现状态（2026-05-27）**：部分完成。DS1/DS2/DS3 配置、7 维参数采样、区域化任务链、任务 DAG、UAV 编队生成已完成并通过测试；建筑/道路/障碍物与简易高程仍未细化建模。
 
 负责生成洪涝灾害仿真场景的全部初始状态。采用参数化模型，从 7 维参数空间中随机采样生成多样化场景。
 
@@ -118,6 +135,8 @@
 
 #### 2.3.2 无人机模拟器 (`UAVSimulator`)
 
+**实现状态（2026-05-27）**：部分完成。任务执行、资源占用释放、电池功耗、状态机、故障中断、GPU/显存利用率采样已完成；风速扰动、转弯半径、传感器故障和更精细 Orin 规格字段仍待补充。
+
 **功能**：
 - **运动模拟**（简化）：匀速巡航 15 m/s，转弯半径 30 m，风速随机扰动 ±2 m/s
 - **电池模型**：不同状态的功耗不同（见下表），电池容量归一化为 100%
@@ -155,6 +174,8 @@ status: UAVStatus                  # IDLE | TRANSIT | COLLECTING | PROCESSING | 
 > 注：功耗值参考了 DJI M300 级别工业无人机的实际飞行功耗（~1000W 包含动力系统 60-70%），加上 Jetson Orin NX 的计算功耗（10-25W）。此处数字为动力之外的设备功耗。
 
 #### 2.3.3 通信网络模拟器 (`MeshNetworkSimulator`)
+
+**实现状态（2026-05-27）**：部分完成。距离驱动链路、RSS/带宽/延迟、多跳最短路径、瓶颈带宽和端到端延迟特征已完成；LoS 地形概率、K=3 备选路径、完整 `network_edge_attrs` 仍待实现。
 
 **设计思路**：网络状态完全由**节点间的三维空间距离**驱动，与 CASCADE.md 3.5.4 节的距离感知模型一致。所有链路属性从距离计算推导，支持多跳中继路由。
 
@@ -230,6 +251,8 @@ path_end_to_end_delay_ms: float  # 到指挥车的端到端延迟
 
 #### 2.3.4 任务管理器 (`TaskManager`)
 
+**实现状态（2026-05-27）**：部分完成。任务生命周期、DAG 依赖解锁、READY 任务查询、区域过滤、完成/超时/抢占/紧急注入和 DAG 统计已完成；任务链生成当前由 `ScenarioGenerator` 执行，`get_pending_count()` 尚未补齐。
+
 **功能**：
 - 根据子区域特征向量和参数触发规则自动生成任务链（5~15 子任务）
 - 管理任务全生命周期（生成 → 排队 → 调度 → 执行 → 完成 / 超时）
@@ -293,6 +316,8 @@ completion_time: Optional[float]
 - `get_pending_count() -> int` — 返回待完成任务总数
 
 #### 2.3.5 仿真环境主环境 (`CASCADEEnv`)
+
+**实现状态（2026-05-27）**：部分完成。Gymnasium 风格接口、区域化观测、动作掩码、reward、事件注入、网络更新和 6 项核心 episode 指标已完成；完全 SimPy 离散事件调度、适应性步长、完整边属性矩阵、统一 Hungarian 解码仍待完成。
 
 ```python
 # 核心伪代码
@@ -410,6 +435,8 @@ class CASCADEEnv(gym.Env):
 > **推荐方案 B**，更贴合 CASCADE.md 3.6.3 节中"各 UAV Actor 输出任务接受概率向量→汇总后 Hungarian 匹配"的 CTDE 设计。
 
 #### 2.3.6 训练步示例：Episode 与 Step 的输入/输出
+
+**实现状态（2026-05-27）**：部分完成。环境侧 episode/step 输入输出已经可以运行并通过 `smoke_env.py`、`run_cascade.py` 和单元测试验证；完整训练循环、多环境并行采样和 mA3C 更新属于 Phase 3，尚未实现。
 
 以下用一个具体实例说明 10,000 个 training episode 中每一步的输入输出关系。
 
