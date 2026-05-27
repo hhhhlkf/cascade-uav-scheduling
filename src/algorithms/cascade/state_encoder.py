@@ -63,21 +63,37 @@ class CASCADEStateEncoder:
         self.module.load_state_dict(state_dict)
 
     def encode(self, obs: Dict[str, np.ndarray]):
-        tensors = {key: self._to_tensor(value) for key, value in obs.items() if isinstance(value, np.ndarray)}
+        tensors = {key: self._to_tensor(key, value) for key, value in obs.items() if isinstance(value, np.ndarray)}
         with self.torch.no_grad():
             return self.module(tensors)
 
     def encode_train(self, obs: Dict[str, np.ndarray]):
-        tensors = {key: self._to_tensor(value) for key, value in obs.items() if isinstance(value, np.ndarray)}
+        tensors = {key: self._to_tensor(key, value) for key, value in obs.items() if isinstance(value, np.ndarray)}
         return self.module(tensors)
 
-    def _to_tensor(self, value: np.ndarray):
+    def _to_tensor(self, key: str, value: np.ndarray):
+        value = self._pad_array(key, value)
         tensor = self.torch.as_tensor(value, dtype=self.torch.float32, device=self.device)
         if tensor.dim() == 1:
             tensor = tensor.unsqueeze(0)
         if tensor.dim() in {2, 3}:
             tensor = tensor.unsqueeze(0)
         return tensor
+
+    def _pad_array(self, key: str, value: np.ndarray) -> np.ndarray:
+        if key == "task_features":
+            return _pad_2d(value, self.module.max_ready_tasks, value.shape[1])
+        if key == "uav_features":
+            return _pad_2d(value, self.module.num_uavs, value.shape[1])
+        if key == "multihop_features":
+            return _pad_2d(value, self.module.num_uavs, value.shape[1])
+        if key == "network_adj":
+            return _pad_2d(value, self.module.max_nodes, self.module.max_nodes)
+        if key == "network_edge_attrs":
+            return _pad_3d(value, self.module.max_nodes, self.module.max_nodes, value.shape[2])
+        if key == "task_dag_adj":
+            return _pad_2d(value, self.module.max_tasks_total, self.module.max_tasks_total)
+        return value
 
 
 def _build_state_encoder_module(torch, nn):
@@ -163,3 +179,17 @@ def _build_state_encoder_module(torch, nn):
             return self.torch.cat([tensor, pad], dim=-1)
 
     return _CASCADEStateEncoderModule
+
+
+def _pad_2d(value: np.ndarray, rows: int, cols: int) -> np.ndarray:
+    padded = np.zeros((rows, cols), dtype=value.dtype)
+    clipped = value[:rows, :cols]
+    padded[: clipped.shape[0], : clipped.shape[1]] = clipped
+    return padded
+
+
+def _pad_3d(value: np.ndarray, rows: int, cols: int, depth: int) -> np.ndarray:
+    padded = np.zeros((rows, cols, depth), dtype=value.dtype)
+    clipped = value[:rows, :cols, :depth]
+    padded[: clipped.shape[0], : clipped.shape[1], : clipped.shape[2]] = clipped
+    return padded

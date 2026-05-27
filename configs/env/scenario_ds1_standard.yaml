@@ -4,15 +4,15 @@ defaults:
 scenario:
   name: ds1_standard
   distribution: DS1
-  disaster_area_km2: [10, 64]
-  flood_ratio: [0.2, 0.6]
-  building_density: [low, medium, high]
-  civilian_density: [1, 35]
-  comm_failure_rate: [0.0, 0.45]
-  breach_risk_level: [0, 3]
+  disaster_area_km2: [25, 64]
+  flood_ratio: [0.3, 0.7]
+  building_density: [medium, high]
+  civilian_density: [10, 40]
+  comm_failure_rate: [0.1, 0.4]
+  breach_risk_level: [1, 2]
   terrain_roughness: [flat, hilly]
-  num_regions: [2, 4]
-  num_uavs_total: [6, 12]
-  uav_orin_8gb_ratio: [0.2, 0.4]
+  num_regions: [2, 3]
+  num_uavs_total: [8, 12]
+  uav_orin_8gb_ratio: [0.3, 0.5]
   simulation_duration_s: 7200
   uav_fault_probability: 0.03
