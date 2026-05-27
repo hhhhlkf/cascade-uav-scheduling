@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 
 from src.algorithms.cascade.hungarian_match import masked_assignment
-from src.algorithms.cascade.ma3c_trainer import CASCADEMA3CScheduler, compute_gae
+from src.algorithms.cascade.ma3c_trainer import CASCADEMA3CScheduler, cascade_factory, compute_gae
 from src.env import CASCADEEnv
 
 try:
@@ -59,6 +59,29 @@ class CascadeAlgorithmTest(unittest.TestCase):
         loaded.load(path)
         loaded.observe(obs)
         self.assertEqual(loaded.decide(obs["action_mask"]).shape, obs["action_mask"].shape)
+
+    @unittest.skipUnless(HAS_TORCH and HAS_PYG, "CASCADE network scheduler requires torch and PyG")
+    def test_checkpoint_with_fixed_uav_capacity_evaluates_smaller_env(self):
+        env = CASCADEEnv("configs/env/scenario_ds1_standard.yaml")
+        obs, _ = env.reset(seed=0)
+        scheduler = CASCADEMA3CScheduler(env.max_ready_tasks, 15)
+        path = "outputs/tmp/test_cascade_15uav.pt"
+        scheduler.save(path)
+        loaded = CASCADEMA3CScheduler(env.max_ready_tasks, 15)
+        loaded.load(path)
+        loaded.observe(obs)
+        action = loaded.decide(obs["action_mask"])
+        self.assertEqual(action.shape, obs["action_mask"].shape)
+
+    @unittest.skipUnless(HAS_TORCH and HAS_PYG, "CASCADE network scheduler requires torch and PyG")
+    def test_cascade_factory_uses_fixed_capacity(self):
+        env = CASCADEEnv("configs/env/scenario_ds1_standard.yaml")
+        obs, _ = env.reset(seed=0)
+        factory = cascade_factory(max_ready_tasks=env.max_ready_tasks, model_num_uavs=15)
+        scheduler = factory(env.max_ready_tasks, len(env.uavs))
+        self.assertEqual(scheduler.num_uavs, 15)
+        scheduler.observe(obs)
+        self.assertEqual(scheduler.decide(obs["action_mask"]).shape, obs["action_mask"].shape)
 
     @unittest.skipUnless(HAS_TORCH and HAS_PYG, "CASCADE GNN encoders require torch and PyG")
     def test_cascade_uses_pyg_gat_and_gcn(self):

@@ -146,8 +146,22 @@ python experiments/train_cascade.py \
   --train-episodes 1000 \
   --eval-episodes 10 \
   --eval-every 100 \
+  --model-num-uavs 15 \
   --seed 0 \
   --output-dir outputs/training/cascade_ma3c_ds1_1000ep
+```
+
+从已有 checkpoint 继续训练：
+
+```bash
+python experiments/train_cascade.py \
+  --checkpoint outputs/training/cascade_ma3c_ds1_1000ep/cascade_ma3c.pt \
+  --train-episodes 1000 \
+  --eval-episodes 10 \
+  --eval-every 100 \
+  --model-num-uavs 15 \
+  --seed 1000 \
+  --output-dir outputs/training/cascade_ma3c_ds1_continue
 ```
 
 训练输出：
@@ -157,6 +171,19 @@ python experiments/train_cascade.py \
 - `eval_metrics.csv`：周期验证指标；`train_metrics.json` 同时保存训练与验证记录。
 
 当前训练实现为单进程端到端流程；异步多环境 A3C 加速是后续增强项。
+
+训练后 checkpoint 跨场景评估：
+
+```bash
+python experiments/run_simple_comparison.py \
+  --checkpoint outputs/training/cascade_ma3c_ds1_1000ep/cascade_ma3c.pt \
+  --model-num-uavs 15 \
+  --scenarios ds1 ds2 ds3 \
+  --methods cascade_ma3c greedy min_load round_robin heft \
+  --episodes 20 \
+  --seed 0 \
+  --output-dir outputs/results/simple_comparison_checkpoint
+```
 
 ## SwanLab 可视化
 

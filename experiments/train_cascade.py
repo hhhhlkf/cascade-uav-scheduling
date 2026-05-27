@@ -9,6 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from src.algorithms.cascade.config_utils import max_ready_tasks_from_config, max_uavs_from_config
 from src.algorithms.cascade.ma3c_trainer import CASCADEMA3CScheduler, MA3CConfig
 from src.env import CASCADEEnv
 from src.evaluation import evaluate_scheduler_details
@@ -97,8 +98,8 @@ def train_one_episode(scheduler: CASCADEMA3CScheduler, config_path: str, seed: i
 
 def _build_scheduler(args: argparse.Namespace) -> CASCADEMA3CScheduler:
     env_config = load_yaml_config(args.config)
-    max_ready_tasks = int(env_config.get("env", {}).get("max_ready_tasks", 16))
-    num_uavs = _max_uavs_from_config(env_config)
+    max_ready_tasks = max_ready_tasks_from_config(env_config)
+    num_uavs = max(int(args.model_num_uavs), max_uavs_from_config(env_config))
     config = MA3CConfig(
         actor_lr=args.actor_lr,
         critic_lr=args.critic_lr,
@@ -108,20 +109,10 @@ def _build_scheduler(args: argparse.Namespace) -> CASCADEMA3CScheduler:
         token_dim=args.token_dim,
         hidden_dim=args.hidden_dim,
     )
-    return CASCADEMA3CScheduler(max_ready_tasks, num_uavs, config=config)
-
-
-def _max_uavs_from_config(config: dict) -> int:
-    scenario = config.get("scenario", {})
-    total = scenario.get("num_uavs_total")
-    if isinstance(total, list):
-        return int(max(total))
-    if isinstance(total, int):
-        return int(total)
-    distribution = scenario.get("uav_type_distribution", {})
-    if distribution:
-        return int(sum(distribution.values()))
-    return 15
+    scheduler = CASCADEMA3CScheduler(max_ready_tasks, num_uavs, config=config)
+    if args.checkpoint:
+        scheduler.load(args.checkpoint)
+    return scheduler
 
 
 def parse_args() -> argparse.Namespace:
@@ -134,6 +125,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-steps", type=int, default=300)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--output-dir", default=None)
+    parser.add_argument("--checkpoint", default=None, help="Optional CASCADE checkpoint to resume from.")
+    parser.add_argument("--model-num-uavs", type=int, default=15, help="Fixed CASCADE model UAV capacity for cross-scenario checkpoints.")
     parser.add_argument("--no-require-gpu", action="store_true")
     parser.add_argument("--actor-lr", type=float, default=3e-4)
     parser.add_argument("--critic-lr", type=float, default=1e-3)

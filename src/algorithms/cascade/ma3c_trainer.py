@@ -231,3 +231,32 @@ class CASCADEMA3CScheduler(BaseScheduler):
         if not valid.any():
             return probs.sum() * 0.0
         return -(probs[valid] * probs[valid].clamp_min(1e-8).log()).mean()
+
+
+def build_cascade_scheduler(
+    max_ready_tasks: int,
+    num_uavs: int = 15,
+    config: MA3CConfig | None = None,
+    checkpoint: str | Path | None = None,
+) -> CASCADEMA3CScheduler:
+    scheduler = CASCADEMA3CScheduler(max_ready_tasks, num_uavs, config=config)
+    if checkpoint:
+        scheduler.load(checkpoint)
+    return scheduler
+
+
+def cascade_factory(
+    max_ready_tasks: int,
+    model_num_uavs: int = 15,
+    config: MA3CConfig | None = None,
+    checkpoint: str | Path | None = None,
+):
+    def _factory(_env_max_ready_tasks: int, _env_num_uavs: int) -> CASCADEMA3CScheduler:
+        return build_cascade_scheduler(
+            max_ready_tasks=max(max_ready_tasks, _env_max_ready_tasks),
+            num_uavs=max(model_num_uavs, _env_num_uavs),
+            config=config,
+            checkpoint=checkpoint,
+        )
+
+    return _factory

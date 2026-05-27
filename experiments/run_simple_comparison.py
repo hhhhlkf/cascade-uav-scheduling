@@ -9,11 +9,13 @@ from typing import Dict
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.algorithms.cascade.ma3c_trainer import CASCADEMA3CScheduler
+from src.algorithms.cascade.config_utils import max_ready_tasks_from_config, max_uavs_from_config
+from src.algorithms.cascade.ma3c_trainer import CASCADEMA3CScheduler, cascade_factory
 from src.algorithms.heuristic import GreedyScheduler, HEFTScheduler, MinLoadScheduler, RoundRobinScheduler
 from src.evaluation import evaluate_scheduler_details
 from src.evaluation.output import ensure_output_dir, write_episode_csv, write_json, write_summary_csv
 from src.evaluation.visualizer import plot_baseline_report
+from src.utils.config import load_yaml_config
 from src.utils.gpu import require_cuda_device
 
 
@@ -43,7 +45,7 @@ def main() -> None:
         )
     output_dir = ensure_output_dir(args.output_dir or _default_output_dir())
     selected_scenarios = {name: SCENARIOS[name] for name in args.scenarios}
-    selected_methods = {name: SIMPLE_METHODS[name] for name in args.methods}
+    selected_methods = _build_methods(args, selected_scenarios)
     all_summary: Dict[str, Dict[str, float]] = {}
     all_episodes: Dict[str, list[Dict[str, float]]] = {}
 
@@ -84,9 +86,35 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", default=None, help="Output directory.")
     parser.add_argument("--no-require-gpu", action="store_true", help="Allow running without CUDA. Use only for local debugging.")
     parser.add_argument("--no-progress", action="store_true", help="Disable tqdm progress bars.")
+    parser.add_argument("--checkpoint", default=None, help="Optional CASCADE checkpoint used only by cascade_ma3c.")
+    parser.add_argument("--model-num-uavs", type=int, default=15, help="Fixed CASCADE model UAV capacity for cross-scenario checkpoints.")
     parser.add_argument("--scenarios", nargs="+", choices=sorted(SCENARIOS), default=["ds1", "ds2", "ds3"])
     parser.add_argument("--methods", nargs="+", choices=sorted(SIMPLE_METHODS), default=list(SIMPLE_METHODS))
     return parser.parse_args()
+
+
+def _build_methods(args: argparse.Namespace, scenarios: Dict[str, str]):
+    methods = {}
+    cascade_max_ready = _max_ready_for_scenarios(scenarios)
+    cascade_num_uavs = max(int(args.model_num_uavs), _max_uavs_for_scenarios(scenarios))
+    for name in args.methods:
+        if name == "cascade_ma3c":
+            methods[name] = cascade_factory(
+                max_ready_tasks=cascade_max_ready,
+                model_num_uavs=cascade_num_uavs,
+                checkpoint=args.checkpoint,
+            )
+        else:
+            methods[name] = SIMPLE_METHODS[name]
+    return methods
+
+
+def _max_ready_for_scenarios(scenarios: Dict[str, str]) -> int:
+    return max(max_ready_tasks_from_config(load_yaml_config(path)) for path in scenarios.values())
+
+
+def _max_uavs_for_scenarios(scenarios: Dict[str, str]) -> int:
+    return max(max_uavs_from_config(load_yaml_config(path)) for path in scenarios.values())
 
 
 def _default_output_dir() -> Path:
