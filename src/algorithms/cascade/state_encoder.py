@@ -4,7 +4,7 @@ from typing import Dict
 
 import numpy as np
 
-from src.algorithms.cascade.gnn_encoder import build_graph_encoder, build_mlp_encoder
+from src.algorithms.cascade.gnn_encoder import build_mlp_encoder, build_network_gcn_encoder, build_task_gat_encoder
 from src.algorithms.cascade.mhsa_fusion import build_mhsa_fusion
 
 
@@ -116,8 +116,8 @@ def _build_state_encoder_module(torch, nn):
             self.global_dim = token_dim * 5
             self.local_dim = 14
 
-            self.task_encoder = build_graph_encoder(8, hidden_dim=128, output_dim=token_dim, num_layers=2)
-            self.net_encoder = build_graph_encoder(14, hidden_dim=128, output_dim=token_dim, num_layers=2)
+            self.task_encoder = build_task_gat_encoder(8, hidden_dim=128, output_dim=token_dim, heads=4)
+            self.net_encoder = build_network_gcn_encoder(14, hidden_dim=128, output_dim=token_dim, num_layers=2)
             self.resource_encoder = build_mlp_encoder(num_uavs * 10, hidden_dim=128, output_dim=token_dim)
             self.modal_encoder = build_mlp_encoder(max_ready_tasks * 8, hidden_dim=128, output_dim=token_dim)
             self.hop_encoder = build_mlp_encoder(num_uavs * 4, hidden_dim=128, output_dim=token_dim)
@@ -139,7 +139,8 @@ def _build_state_encoder_module(torch, nn):
             task_token = self.task_encoder(task_nodes, task_adj_ready, task_mask)
 
             net_nodes = self._network_nodes(uav_features, multihop, edge_attrs)
-            net_token = self.net_encoder(net_nodes, net_adj, None)
+            net_mask = (net_adj.abs().sum(dim=-1) > 0.0) | (net_nodes.abs().sum(dim=-1) > 0.0)
+            net_token = self.net_encoder(net_nodes, net_adj, net_mask, edge_attrs)
 
             resource_token = self.resource_encoder(uav_features.reshape(batch, -1))
             modal_token = self.modal_encoder(task_features.reshape(batch, -1))

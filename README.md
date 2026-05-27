@@ -50,6 +50,8 @@ source .venv/bin/activate
 uv pip install -r requirements.txt
 ```
 
+依赖中包含 PyTorch Geometric 及其 `torch 2.6.0+cu124` 对应扩展 wheel；任务 DAG 编码使用 PyG `GATConv`，网络拓扑编码使用 PyG `GCNConv`。
+
 ## 快速开始
 
 ```bash

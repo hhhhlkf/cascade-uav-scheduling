@@ -602,7 +602,7 @@ class BaseScheduler(ABC):
 
 ### 3.2 CASCADE (mA3C+MHSA+GNN) — 本文方法
 
-**实现状态（2026-05-27）**：框架完成，已远端测试。`src/algorithms/cascade/` 已落地状态编码器、轻量图消息传递编码、MHSA 融合、共享 UAV Actor、指挥车 Critic、Hungarian 汇总匹配、GAE/return 计算和 checkpoint 接口。当前图编码器使用 dense adjacency message passing 作为可运行替代，后续 Phase 2/3 可在同一接口下替换为 PyTorch Geometric 的 GAT/GCN。
+**实现状态（2026-05-27）**：框架完成，已远端测试。`src/algorithms/cascade/` 已落地状态编码器、PyTorch Geometric GAT 任务 DAG 编码、PyTorch Geometric GCN 网络拓扑编码、MHSA 融合、共享 UAV Actor、指挥车 Critic、Hungarian 汇总匹配、GAE/return 计算和 checkpoint 接口。
 
 对应 CASCADE.md 第 3.6 节。
 
@@ -623,7 +623,7 @@ class BaseScheduler(ABC):
 
 #### 3.2.2 网络结构
 
-**实现状态（2026-05-27）**：完成，已远端测试。`state_encoder.py` 将任务 DAG、网络拓扑、UAV 资源、多模态任务特征和多跳路径特征编码为 5 个 token，经 `mhsa_fusion.py` 融合为 `h_global`；`actor_network.py` 输出每架 UAV 对 ready tasks 的 logits，`critic_network.py` 输出状态价值 `V(s)`。
+**实现状态（2026-05-27）**：完成，已远端测试。`state_encoder.py` 将任务 DAG、网络拓扑、UAV 资源、多模态任务特征和多跳路径特征编码为 5 个 token，其中 `gnn_encoder.py` 使用 PyG `GATConv` 编码任务 DAG、使用 PyG `GCNConv` 编码距离感知网络拓扑，经 `mhsa_fusion.py` 融合为 `h_global`；`actor_network.py` 输出每架 UAV 对 ready tasks 的 logits，`critic_network.py` 输出状态价值 `V(s)`。
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐

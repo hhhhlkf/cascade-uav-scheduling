@@ -13,6 +13,13 @@ try:
 except ImportError:
     HAS_TORCH = False
 
+try:
+    import torch_geometric  # noqa: F401
+
+    HAS_PYG = True
+except ImportError:
+    HAS_PYG = False
+
 
 class CascadeAlgorithmTest(unittest.TestCase):
     def test_masked_assignment_respects_mask(self):
@@ -29,7 +36,7 @@ class CascadeAlgorithmTest(unittest.TestCase):
         mask = np.ones((2, 2), dtype=np.float32)
         self.assertEqual(masked_assignment(scores, mask), [])
 
-    @unittest.skipUnless(HAS_TORCH, "CASCADE network scheduler requires torch")
+    @unittest.skipUnless(HAS_TORCH and HAS_PYG, "CASCADE network scheduler requires torch and PyG")
     def test_cascade_scheduler_network_action(self):
         env = CASCADEEnv("configs/env/scenario_s1_dongting.yaml")
         obs, _ = env.reset(seed=0)
@@ -39,7 +46,7 @@ class CascadeAlgorithmTest(unittest.TestCase):
         self.assertEqual(action.shape, obs["action_mask"].shape)
         self.assertTrue(np.all(action[obs["action_mask"] <= 0.0] == 0.0))
 
-    @unittest.skipUnless(HAS_TORCH, "CASCADE network scheduler requires torch")
+    @unittest.skipUnless(HAS_TORCH and HAS_PYG, "CASCADE network scheduler requires torch and PyG")
     def test_cascade_value_and_checkpoint_round_trip(self):
         env = CASCADEEnv("configs/env/scenario_s1_dongting.yaml")
         obs, _ = env.reset(seed=0)
@@ -52,6 +59,13 @@ class CascadeAlgorithmTest(unittest.TestCase):
         loaded.load(path)
         loaded.observe(obs)
         self.assertEqual(loaded.decide(obs["action_mask"]).shape, obs["action_mask"].shape)
+
+    @unittest.skipUnless(HAS_TORCH and HAS_PYG, "CASCADE GNN encoders require torch and PyG")
+    def test_cascade_uses_pyg_gat_and_gcn(self):
+        env = CASCADEEnv("configs/env/scenario_s1_dongting.yaml")
+        scheduler = CASCADEMA3CScheduler(env.max_ready_tasks, len(env.uavs))
+        self.assertEqual(scheduler.encoder.module.task_encoder.gat1.__class__.__name__, "GATConv")
+        self.assertEqual(scheduler.encoder.module.net_encoder.convs[0].__class__.__name__, "GCNConv")
 
     def test_compute_gae_shapes_and_returns(self):
         advantages, returns = compute_gae(
