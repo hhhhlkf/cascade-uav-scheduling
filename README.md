@@ -30,42 +30,69 @@ scheduling-rl/
 
 ## 远程实验环境
 
-实验运行在远程 GPU 服务器（AutoDL），SSH 连接信息见 [CLAUDE.md](CLAUDE.md)。
+正式训练和带 Torch 网络前向的验证运行在远程 GPU 服务器上。远程连接信息放在本地 `ssh-config.local`，该文件不提交。
+
+远程工作目录：
+
+```bash
+/root/autodl-tmp/code/cascade-uav-scheduling/
+```
+
+远程环境初始化：
+
+```bash
+which uv || curl -LsSf https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env
+
+cd /root/autodl-tmp/code/cascade-uav-scheduling
+uv venv --python 3.10
+source .venv/bin/activate
+uv pip install -r requirements.txt
+```
 
 ## 快速开始
 
 ```bash
-# 安装依赖
-pip install -r requirements.txt
+# 远端进入项目环境
+cd /root/autodl-tmp/code/cascade-uav-scheduling
+source .venv/bin/activate
 
-# 运行仿真环境测试
+# 运行测试
 python -m unittest discover -s tests
+python experiments/smoke_env.py
 
-# 运行启发式 baseline，并生成 JSON/CSV/PNG 图表
-python experiments/run_baselines_only.py --episodes 5 --seed 0
+# 训练 CASCADE（短跑 smoke；正式实验增大 train-episodes）
+python experiments/train_cascade.py \
+  --train-episodes 10 \
+  --eval-episodes 2 \
+  --eval-every 5 \
+  --seed 0 \
+  --output-dir outputs/training/cascade_ma3c_smoke
 
-# 运行本文新方法 CASCADE
-python experiments/run_cascade.py --episodes 5 --seed 0
-
-# 指定输出目录
-python experiments/run_baselines_only.py \
-  --config configs/env/scenario_s1_dongting.yaml \
-  --episodes 5 \
-  --output-dir outputs/results/s1_baselines
-
-# 运行 E1 主对比：CASCADE vs baselines
-python experiments/run_e1_comparison.py --episodes 5 --seed 0
+# 简单经典方法对比：DS1/DS2/DS3 × CASCADE/Greedy/Min-Load/Round-Robin/HEFT
+python experiments/run_simple_comparison.py \
+  --episodes 3 \
+  --seed 0 \
+  --output-dir outputs/results/simple_comparison_smoke
 ```
 
 ## 实验输入输出
 
-当前有三个常用评估入口：
+当前常用入口：
 
-- `experiments/run_cascade.py`：只运行本文新方法 CASCADE。
-- `experiments/run_baselines_only.py`：只运行 Greedy / MinLoad / RoundRobin / HEFT baseline。
-- `experiments/run_e1_comparison.py`：运行 E1 主对比，包含 CASCADE + baselines。
+- `experiments/train_cascade.py`：端到端训练 CASCADE，包含 GAE、Actor-Critic 更新、周期验证、checkpoint 和训练指标输出。
+- `experiments/run_simple_comparison.py`：运行当前主推的简单经典对比，覆盖 DS1/DS2/DS3 与 CASCADE / Greedy / Min-Load / Round-Robin / HEFT。
+- `experiments/run_cascade.py`：只评估当前 CASCADE 调度器。
+- `experiments/run_baselines_only.py`：只评估 Greedy / Min-Load / Round-Robin / HEFT。
+- `experiments/run_e1_comparison.py`：兼容旧 E1 主对比入口，包含 CASCADE + baselines。
 
-默认输入为 `configs/env/scenario_s1_dongting.yaml`，输出目录为 `outputs/results/<experiment>_<timestamp>/`。
+当前标准场景配置：
+
+- `configs/env/scenario_ds1_standard.yaml`：标准洪涝，训练/ID 测试。
+- `configs/env/scenario_ds2_complex.yaml`：复杂洪涝，OOD 泛化测试。
+- `configs/env/scenario_ds3_extreme.yaml`：极端/降级场景，含 UAV 故障与应急任务注入。
+
+输出目录默认为 `outputs/results/<experiment>_<timestamp>/` 或 `outputs/training/<experiment>_<timestamp>/`。
 
 每次运行会生成：
 
@@ -77,30 +104,57 @@ python experiments/run_e1_comparison.py --episodes 5 --seed 0
 - `figures/total_reward.png`
 - `figures/rpdr_proxy.png`
 - `figures/baseline_radar.png`
+- `figures/episode_metric_trends.png`
+- `figures/episode_cumulative_mean_trends.png`
 
-推荐先用本地输出确认结果，再把同一命令放到远程服务器上跑更多 episode。
+推荐在远端先跑小规模 smoke，再扩大 episode 数。
 
 ```bash
+# 只跑 CASCADE 评估
 python experiments/run_cascade.py \
-  --config configs/env/scenario_s1_dongting.yaml \
-  --episodes 20 \
+  --config configs/env/scenario_ds1_standard.yaml \
   --seed 0 \
-  --output-dir outputs/results/s1_cascade_20ep
+  --episodes 20 \
+  --output-dir outputs/results/ds1_cascade_20ep
 
+# 只跑经典 baseline
 python experiments/run_baselines_only.py \
-  --config configs/env/scenario_s1_dongting.yaml \
+  --config configs/env/scenario_ds1_standard.yaml \
   --episodes 20 \
   --seed 0 \
-  --output-dir outputs/results/s1_baselines_20ep
+  --output-dir outputs/results/ds1_baselines_20ep
 
-python experiments/run_e1_comparison.py \
-  --config configs/env/scenario_s1_dongting.yaml \
+# 当前推荐的简单经典对比
+python experiments/run_simple_comparison.py \
+  --scenarios ds1 ds2 ds3 \
+  --methods cascade_ma3c greedy min_load round_robin heft \
   --episodes 20 \
   --seed 0 \
-  --output-dir outputs/results/s1_e1_comparison_20ep
+  --output-dir outputs/results/simple_comparison_20ep
 ```
 
-注意：当前 `run_cascade.py` 调用的是可运行的 `CASCADEMA3CScheduler` 框架入口，已经包含 action mask + Hungarian 匹配链路；完整 mA3C+MHSA+GNN 训练更新逻辑仍在后续 Phase 3 中继续接入。
+## CASCADE 训练
+
+`train_cascade.py` 会在每个 episode 重新采样 DS1 场景，执行当前策略，收集 reward/value/log-prob，计算 GAE，并做 Actor-Critic 更新。
+
+```bash
+python experiments/train_cascade.py \
+  --config configs/env/scenario_ds1_standard.yaml \
+  --eval-config configs/env/scenario_ds1_standard.yaml \
+  --train-episodes 1000 \
+  --eval-episodes 10 \
+  --eval-every 100 \
+  --seed 0 \
+  --output-dir outputs/training/cascade_ma3c_ds1_1000ep
+```
+
+训练输出：
+
+- `cascade_ma3c.pt`：模型 checkpoint。
+- `train_metrics.csv` / `train_metrics.json`：训练 episode 指标。
+- `eval_metrics.csv`：周期验证指标；`train_metrics.json` 同时保存训练与验证记录。
+
+当前训练实现为单进程端到端流程；异步多环境 A3C 加速是后续增强项。
 
 ## SwanLab 可视化
 
@@ -142,6 +196,15 @@ python experiments/run_e1_comparison.py \
   --swanlab-mode cloud \
   --swanlab-project cascade-uav-scheduling \
   --swanlab-experiment e1-main-comparison
+```
+
+简单经典对比云端记录：
+
+```bash
+python experiments/run_simple_comparison.py \
+  --episodes 20 \
+  --seed 0 \
+  --output-dir outputs/results/simple_comparison_cloud
 ```
 
 服务器未登录或离线环境可用 offline 模式，仍会保留本地 SwanLab 日志和 PNG 图表：
