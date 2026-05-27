@@ -8,6 +8,11 @@ from src.env.network_simulator import MeshNetworkSimulator
 from src.env.uav_simulator import UAVSimulator
 from src.utils.types import Task
 
+try:
+    from scipy.optimize import linear_sum_assignment
+except ImportError:  # pragma: no cover
+    linear_sum_assignment = None
+
 
 def compute_action_mask(
     ready_tasks: List[Task],
@@ -36,6 +41,15 @@ def decode_assignment_matrix(action: np.ndarray, mask: np.ndarray) -> List[tuple
         padded[:rows, :cols] = scores[:rows, :cols]
         scores = padded
     scores = scores * mask
+    if linear_sum_assignment is not None and np.any(scores > 0.0):
+        cost = -scores.copy()
+        cost[(mask <= 0.0) | (scores <= 0.0)] = 1e6
+        rows, cols = linear_sum_assignment(cost)
+        return [
+            (int(row), int(col))
+            for row, col in zip(rows, cols)
+            if mask[row, col] > 0.0 and scores[row, col] > 0.0 and cost[row, col] < 1e6
+        ]
     candidates = [
         (float(scores[task_idx, uav_idx]), task_idx, uav_idx)
         for task_idx in range(scores.shape[0])
@@ -53,4 +67,3 @@ def decode_assignment_matrix(action: np.ndarray, mask: np.ndarray) -> List[tuple
         used_tasks.add(task_idx)
         used_uavs.add(uav_idx)
     return assignments
-

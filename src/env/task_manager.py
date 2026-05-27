@@ -76,6 +76,9 @@ class TaskManager:
     def timed_out_tasks(self) -> List[Task]:
         return [task for task in self.tasks.values() if task.status == TaskStatus.TIMEOUT]
 
+    def get_pending_count(self) -> int:
+        return sum(1 for task in self.tasks.values() if not task.is_terminal())
+
     def task_dag_adjacency(self, ordered_task_ids: List[str]) -> np.ndarray:
         idx = {task_id: i for i, task_id in enumerate(ordered_task_ids)}
         adj = np.zeros((len(ordered_task_ids), len(ordered_task_ids)), dtype=np.float32)

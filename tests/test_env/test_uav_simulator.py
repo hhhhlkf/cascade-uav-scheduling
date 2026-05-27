@@ -3,6 +3,7 @@ import unittest
 from src.env.scenario_generator import ScenarioGenerator
 from src.env.uav_simulator import UAVSimulator
 from src.utils.config import load_yaml_config
+from src.utils.types import ModalityType
 
 
 class UAVSimulatorTest(unittest.TestCase):
@@ -20,7 +21,15 @@ class UAVSimulatorTest(unittest.TestCase):
                 break
         self.assertTrue(completed)
 
+    def test_sensor_fault_blocks_matching_modality(self):
+        config = load_yaml_config("configs/env/scenario_s1_dongting.yaml")
+        scenario = ScenarioGenerator(config).generate()
+        task = next(task for task in scenario.tasks if task.modality == ModalityType.RGB)
+        uav_data = next(candidate for candidate in scenario.uavs if ModalityType.RGB in candidate.sensors)
+        uav = UAVSimulator(uav_data)
+        uav.uav.faulted_sensors.append(ModalityType.RGB)
+        self.assertFalse(uav.can_accept(task))
+
 
 if __name__ == "__main__":
     unittest.main()
-

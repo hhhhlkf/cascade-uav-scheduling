@@ -34,6 +34,8 @@ class UAVSimulator:
         self.energy_consumed_wh = 0.0
         self.gpu_util_samples: List[float] = []
         self.memory_util_samples: List[float] = []
+        seed = sum(ord(char) for char in uav.uav_id)
+        self.rng = np.random.default_rng(seed)
 
     @property
     def uav_id(self) -> str:
@@ -46,6 +48,8 @@ class UAVSimulator:
             return False
         if task.required_uav_types and self.uav.uav_type not in task.required_uav_types:
             return False
+        if task.modality in self.uav.faulted_sensors:
+            return False
         if task.modality not in self.uav.sensors and task.modality.value != "MIXED":
             return False
         return task.resource_requirement.fits_within(self.uav.resources_available)
@@ -55,7 +59,10 @@ class UAVSimulator:
             return False
         task.resource_requirement.reserve_from(self.uav.resources_available)
         distance = self.uav.position.distance_to(task.target_position)
-        transit_s = distance / max(self.uav.cruise_speed_mps, 1e-6)
+        wind = float(self.rng.uniform(-self.uav.wind_disturbance_mps, self.uav.wind_disturbance_mps))
+        effective_speed = max(self.uav.cruise_speed_mps + wind, 1.0)
+        turn_s = min(np.pi * self.uav.turn_radius_m / (2.0 * effective_speed), 20.0)
+        transit_s = distance / effective_speed + turn_s
         remaining_s = transit_s + task.duration_s
         task.assigned_uav = self.uav.uav_id
         task.start_time_s = now_s
@@ -92,6 +99,14 @@ class UAVSimulator:
         self._cap_resources()
         self.uav.status = UAVStatus.FAULTED
         return interrupted
+
+    def trigger_sensor_fault(self) -> str | None:
+        available = [sensor for sensor in self.uav.sensors if sensor not in self.uav.faulted_sensors]
+        if not available:
+            return None
+        sensor = available[int(self.rng.integers(0, len(available)))]
+        self.uav.faulted_sensors.append(sensor)
+        return sensor.value
 
     def available_resources(self) -> ResourceVec:
         return self.uav.resources_available
@@ -168,8 +183,12 @@ class UAVSimulator:
                 sensors=list(self.uav.sensors),
                 max_concurrent_tasks=self.uav.max_concurrent_tasks,
                 cruise_speed_mps=self.uav.cruise_speed_mps,
+                turn_radius_m=self.uav.turn_radius_m,
+                wind_disturbance_mps=self.uav.wind_disturbance_mps,
                 battery_capacity_wh=self.uav.battery_capacity_wh,
+                sensor_fault_probability=self.uav.sensor_fault_probability,
                 status=self.uav.status,
                 current_tasks=list(self.uav.current_tasks),
+                faulted_sensors=list(self.uav.faulted_sensors),
             )
         )

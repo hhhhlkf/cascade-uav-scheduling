@@ -15,8 +15,8 @@ class TaskManagerTest(unittest.TestCase):
         self.assertTrue(ready)
         self.assertTrue(all(task.status == TaskStatus.READY for task in ready))
         self.assertEqual(manager.get_dag_stats()["is_dag"], 1.0)
+        self.assertEqual(manager.get_pending_count(), len(scenario.tasks))
 
 
 if __name__ == "__main__":
     unittest.main()
-

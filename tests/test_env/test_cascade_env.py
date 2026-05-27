@@ -15,6 +15,7 @@ class CASCADEEnvTest(unittest.TestCase):
         self.assertIn("action_mask", obs)
         self.assertIn("current_region_features", obs)
         self.assertIn("multihop_features", obs)
+        self.assertIn("network_edge_attrs", obs)
         mask = env.get_action_mask()
         action = np.zeros_like(mask)
         if mask.any():
@@ -26,6 +27,7 @@ class CASCADEEnvTest(unittest.TestCase):
         self.assertIn("atct_s", info)
         self.assertIn("gpu_util_mean", info)
         self.assertIn("memory_util_mean", info)
+        self.assertIn("pending_tasks", info)
         self.assertIsInstance(float(reward), float)
         self.assertFalse(terminated and truncated)
 
@@ -34,6 +36,7 @@ class CASCADEEnvTest(unittest.TestCase):
         obs, info = env.reset(seed=1)
         self.assertEqual(obs["current_region_features"].shape, (7,))
         self.assertEqual(obs["multihop_features"].shape[1], 4)
+        self.assertEqual(obs["network_edge_attrs"].shape[2], 4)
         self.assertIn(info["current_region"], {region.region_id for region in env.scenario.regions})
 
     def test_configured_emergency_injection(self):

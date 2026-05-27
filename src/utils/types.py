@@ -162,9 +162,13 @@ class UAV:
     sensors: List[ModalityType]
     max_concurrent_tasks: int = 2
     cruise_speed_mps: float = 15.0
+    turn_radius_m: float = 30.0
+    wind_disturbance_mps: float = 2.0
     battery_capacity_wh: float = 1000.0
+    sensor_fault_probability: float = 0.0
     status: UAVStatus = UAVStatus.IDLE
     current_tasks: List[str] = field(default_factory=list)
+    faulted_sensors: List[ModalityType] = field(default_factory=list)
 
     def feature_vector(self, area_size: Tuple[float, float]) -> np.ndarray:
         area_x, area_y = area_size

@@ -14,8 +14,13 @@ class NetworkSimulatorTest(unittest.TestCase):
         adj = network.adjacency_matrix()
         self.assertEqual(adj.shape[0], len(scenario.uavs) + 1)
         self.assertTrue((adj.diagonal() == 1.0).all())
+        edge_attrs = network.edge_attr_tensor()
+        self.assertEqual(edge_attrs.shape, (len(scenario.uavs) + 1, len(scenario.uavs) + 1, 4))
+        paths = network.k_shortest_path_metrics(scenario.uavs[0].uav_id, network.command_vehicle_id, k=3)
+        self.assertLessEqual(len(paths), 3)
+        if paths:
+            self.assertIn("bottleneck_bw_mbps", paths[0])
 
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -184,7 +184,11 @@ class ScenarioGenerator:
             breach_points=breaches,
             uavs=uavs,
             tasks=tasks,
-            topo_config=self.config.get("network", {}) | {"comm_failure_rate": float(params.get("comm_failure_rate", 0.1))},
+            topo_config=self.config.get("network", {})
+            | {
+                "comm_failure_rate": float(params.get("comm_failure_rate", 0.1)),
+                "terrain_roughness": str(params.get("terrain_roughness", "flat")),
+            },
             regions=regions,
             metadata={
                 "distribution": params.get("distribution", "fixed"),
@@ -193,7 +197,11 @@ class ScenarioGenerator:
                 "water_level_mean": self.scenario_cfg.get("water_level_mean", 1.5),
                 "simulation_duration_s": self.scenario_cfg.get("simulation_duration_s", 7200),
                 "uav_fault_probability": self.scenario_cfg.get("uav_fault_probability", 0.0),
+                "sensor_fault_probability": self.scenario_cfg.get("sensor_fault_probability", 0.0),
                 "num_civilians": self.scenario_cfg.get("num_civilians", len(civilians)),
+                "buildings": self._generate_buildings(area, params),
+                "roads": self._generate_roads(area),
+                "elevation_model": self._generate_elevation_model(params),
             },
         )
 
@@ -260,6 +268,7 @@ class ScenarioGenerator:
                         resources_total=total,
                         resources_available=clone_resource(total),
                         sensors=list(profile["sensors"]),
+                        sensor_fault_probability=float(self.scenario_cfg.get("sensor_fault_probability", 0.0)),
                     )
                 )
         return uavs
@@ -467,3 +476,31 @@ class ScenarioGenerator:
 
     def _random_position(self, area: Tuple[float, float]) -> Position:
         return Position(float(self.rng.uniform(0, area[0])), float(self.rng.uniform(0, area[1])), 0.0)
+
+    def _generate_buildings(self, area: Tuple[float, float], params: Dict[str, object]) -> List[Dict[str, float]]:
+        density = str(params.get("building_density", "medium"))
+        per_km2 = {"low": 2, "medium": 6, "high": 12}.get(density, 6)
+        count = int(per_km2 * area[0] * area[1] / 1_000_000.0)
+        return [
+            {
+                "x": float(self.rng.uniform(0.0, area[0])),
+                "y": float(self.rng.uniform(0.0, area[1])),
+                "width_m": float(self.rng.uniform(20.0, 120.0)),
+                "height_m": float(self.rng.uniform(10.0, 80.0)),
+            }
+            for _ in range(count)
+        ]
+
+    def _generate_roads(self, area: Tuple[float, float]) -> List[Dict[str, List[float]]]:
+        return [
+            {"start": [0.0, float(area[1] * ratio)], "end": [float(area[0]), float(area[1] * ratio)]}
+            for ratio in (0.25, 0.5, 0.75)
+        ] + [
+            {"start": [float(area[0] * ratio), 0.0], "end": [float(area[0] * ratio), float(area[1])]}
+            for ratio in (0.33, 0.66)
+        ]
+
+    def _generate_elevation_model(self, params: Dict[str, object]) -> Dict[str, float | str]:
+        terrain = str(params.get("terrain_roughness", "flat"))
+        amplitude = {"flat": 3.0, "hilly": 20.0, "complex": 60.0}.get(terrain, 10.0)
+        return {"type": "sinusoidal", "terrain_roughness": terrain, "amplitude_m": amplitude}

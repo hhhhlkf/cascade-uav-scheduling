@@ -119,7 +119,7 @@ class CASCADEEnv(gym.Env):
             else:
                 invalid_count += 1
 
-        self.sim_time_s += self.step_seconds
+        self._advance_clock(self.step_seconds)
         self.step_count += 1
         completed = []
         for uav in self.uavs:
@@ -155,6 +155,13 @@ class CASCADEEnv(gym.Env):
         )
         return obs, reward, terminated, truncated, info
 
+    def _advance_clock(self, dt_s: float) -> None:
+        if self.simpy_env is not None:
+            self.simpy_env.run(until=self.simpy_env.now + dt_s)
+            self.sim_time_s = float(self.simpy_env.now)
+        else:
+            self.sim_time_s += dt_s
+
     def get_action_mask(self) -> np.ndarray:
         self._select_current_region()
         ready_tasks = self.task_manager.get_ready_tasks(self.max_ready_tasks, region_id=self.current_region_id)
@@ -177,6 +184,7 @@ class CASCADEEnv(gym.Env):
     def _maybe_inject_events(self) -> List[Dict]:
         events: List[Dict] = []
         events.extend(self._maybe_inject_faults())
+        events.extend(self._maybe_inject_sensor_faults())
         events.extend(self._maybe_inject_emergencies())
         return events
 
@@ -202,6 +210,20 @@ class CASCADEEnv(gym.Env):
                     "interrupted_tasks": [task.task_id for task in interrupted],
                 }
             )
+        return events
+
+    def _maybe_inject_sensor_faults(self) -> List[Dict]:
+        probability = float(self.scenario.metadata.get("sensor_fault_probability", 0.0))
+        if probability <= 0.0:
+            return []
+        per_step_probability = probability / max(self.max_steps, 1)
+        events: List[Dict] = []
+        for uav in self.uavs:
+            if self.rng.random() >= per_step_probability:
+                continue
+            sensor = uav.trigger_sensor_fault()
+            if sensor:
+                events.append({"type": "sensor_fault", "uav_id": uav.uav_id, "sensor": sensor})
         return events
 
     def _maybe_inject_emergencies(self) -> List[Dict]:
@@ -274,6 +296,7 @@ class CASCADEEnv(gym.Env):
 
         node_order = [self.network.command_vehicle_id] + [uav.uav_id for uav in self.uavs]
         network_adj = self.network.adjacency_matrix(node_order)
+        network_edge_attrs = self.network.edge_attr_tensor(node_order)
         multihop_features = self.network.multihop_feature_matrix([uav.uav_id for uav in self.uavs])
         task_ids = list(self.task_manager.tasks.keys())
         task_dag_adj = self.task_manager.task_dag_adjacency(task_ids)
@@ -283,6 +306,7 @@ class CASCADEEnv(gym.Env):
             "task_features": task_features,
             "uav_features": uav_features,
             "network_adj": network_adj.astype(np.float32),
+            "network_edge_attrs": network_edge_attrs.astype(np.float32),
             "multihop_features": multihop_features.astype(np.float32),
             "current_region_features": self._current_region_feature(),
             "task_dag_adj": padded_dag,
@@ -297,6 +321,7 @@ class CASCADEEnv(gym.Env):
                 "task_features": spaces.Box(0.0, np.inf, shape=(self.max_ready_tasks, 8), dtype=np.float32),
                 "uav_features": spaces.Box(0.0, np.inf, shape=(len(self.uavs), 10), dtype=np.float32),
                 "network_adj": spaces.Box(0.0, 1.0, shape=(self.max_nodes, self.max_nodes), dtype=np.float32),
+                "network_edge_attrs": spaces.Box(0.0, 1.0, shape=(self.max_nodes, self.max_nodes, 4), dtype=np.float32),
                 "multihop_features": spaces.Box(0.0, 1.0, shape=(len(self.uavs), 4), dtype=np.float32),
                 "current_region_features": spaces.Box(0.0, 1.0, shape=(7,), dtype=np.float32),
                 "task_dag_adj": spaces.Box(0.0, 1.0, shape=(self.max_tasks_total, self.max_tasks_total), dtype=np.float32),
@@ -318,6 +343,7 @@ class CASCADEEnv(gym.Env):
             "completed_tasks": len(completed),
             "timed_out_tasks": len(self.task_manager.timed_out_tasks()),
             "ready_tasks": len(self.task_manager.get_ready_tasks(region_id=self.current_region_id)),
+            "pending_tasks": self.task_manager.get_pending_count(),
             "tdsr": len(on_time) / max(len(deadline_tasks), 1),
             "rpdr_proxy": min(len(rescue_completed) / max(float(self.scenario.metadata.get("num_civilians", 1)), 1.0), 1.0),
             "dag_stats": self.task_manager.get_dag_stats(),

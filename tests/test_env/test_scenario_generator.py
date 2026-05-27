@@ -27,6 +27,10 @@ class ScenarioGeneratorTest(unittest.TestCase):
         self.assertTrue(all(5 <= count <= 15 for count in per_region_counts.values()))
         self.assertTrue(any(task.task_type.startswith("A") for task in scenario.tasks))
         self.assertTrue(any(task.task_type.startswith("C") for task in scenario.tasks))
+        self.assertIn("buildings", scenario.metadata)
+        self.assertIn("roads", scenario.metadata)
+        self.assertIn("elevation_model", scenario.metadata)
+        self.assertIn("terrain_roughness", scenario.topo_config)
 
 
 if __name__ == "__main__":
