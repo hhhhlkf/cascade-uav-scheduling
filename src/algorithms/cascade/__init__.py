@@ -1,4 +1,4 @@
 from src.algorithms.cascade.hungarian_match import masked_assignment
+from src.algorithms.cascade.ma3c_trainer import CASCADEMA3CScheduler, MA3CConfig, compute_gae
 
-__all__ = ["masked_assignment"]
-
+__all__ = ["CASCADEMA3CScheduler", "MA3CConfig", "compute_gae", "masked_assignment"]
