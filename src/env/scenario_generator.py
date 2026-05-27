@@ -393,7 +393,10 @@ class ScenarioGenerator:
         communication = ["C2"]
         if region.comm_failure_rate >= 0.3:
             communication.insert(0, "C1")
-        return (acquisition + preprocessing + inference + fusion + communication)[:15]
+        optional = acquisition + preprocessing + inference + fusion
+        if len(optional) + len(communication) <= 15:
+            return optional + communication
+        return optional[: 15 - len(communication)] + communication
 
     def _build_catalog_task(self, region: Region, task_type: str, area: Tuple[float, float], local_idx: int) -> Task:
         spec = TASK_CATALOG[task_type]
