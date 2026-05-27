@@ -554,9 +554,11 @@ Episode #k:
 
 ## 3. 算法框架设计
 
+**整体完成状态（2026-05-27）**：算法框架设计已完成并通过远端 GPU 服务器验证。验证环境为远端 `.venv` 中 `torch=2.6.0+cu124`、CUDA `12.4`、GPU `NVIDIA GeForce RTX 4080`；已运行 `python -m unittest tests.test_algorithms.test_cascade`、`python -m unittest discover -s tests` 和 `python experiments/run_cascade.py --episodes 1 --seed 0 --swanlab-mode disabled --no-progress --output-dir outputs/results/remote_algorithm_framework_recheck`，全部通过。完整异步多环境训练与长 episode 收敛实验属于 Phase 3 训练工程，不属于本节“算法框架设计”的完成条件。
+
 ### 3.1 调度算法抽象基类
 
-**实现状态（2026-05-27）**：完成。`src/algorithms/base_scheduler.py` 已提供统一 `observe()`、`decide()`、`learn()`、`reset()`、`save()`、`load()` 接口；启发式方法复用空学习接口，CASCADE 学习型调度器实现模型保存/加载。
+**实现状态（2026-05-27）**：完成，已远端测试。`src/algorithms/base_scheduler.py` 已提供统一 `observe()`、`decide()`、`learn()`、`reset()`、`save()`、`load()` 接口；启发式方法复用空学习接口，CASCADE 学习型调度器实现模型保存/加载。
 
 ```python
 from abc import ABC, abstractmethod
@@ -600,13 +602,13 @@ class BaseScheduler(ABC):
 
 ### 3.2 CASCADE (mA3C+MHSA+GNN) — 本文方法
 
-**实现状态（2026-05-27）**：框架完成。`src/algorithms/cascade/` 已落地状态编码器、轻量图消息传递编码、MHSA 融合、共享 UAV Actor、指挥车 Critic、Hungarian 汇总匹配、GAE/return 计算和 checkpoint 接口。当前图编码器使用 dense adjacency message passing 作为可运行替代，后续 Phase 2/3 可在同一接口下替换为 PyTorch Geometric 的 GAT/GCN。
+**实现状态（2026-05-27）**：框架完成，已远端测试。`src/algorithms/cascade/` 已落地状态编码器、轻量图消息传递编码、MHSA 融合、共享 UAV Actor、指挥车 Critic、Hungarian 汇总匹配、GAE/return 计算和 checkpoint 接口。当前图编码器使用 dense adjacency message passing 作为可运行替代，后续 Phase 2/3 可在同一接口下替换为 PyTorch Geometric 的 GAT/GCN。
 
 对应 CASCADE.md 第 3.6 节。
 
 #### 3.2.1 核心改进点（相对于 DECCo mA2C）
 
-**实现状态（2026-05-27）**：完成。多 Agent Actor-Critic、DAG/网络拓扑/资源/多跳特征融合、并发任务-UAV 动作矩阵、Hungarian 离散化、6 维资源和距离感知网络均已进入代码框架。
+**实现状态（2026-05-27）**：完成，已远端测试。多 Agent Actor-Critic、DAG/网络拓扑/资源/多跳特征融合、并发任务-UAV 动作矩阵、Hungarian 离散化、6 维资源和距离感知网络均已进入代码框架。
 
 | 维度 | DECCo (mA2C) | CASCADE (mA3C+MHSA+GNN) |
 |------|-------------|------------------------|
@@ -621,7 +623,7 @@ class BaseScheduler(ABC):
 
 #### 3.2.2 网络结构
 
-**实现状态（2026-05-27）**：完成。`state_encoder.py` 将任务 DAG、网络拓扑、UAV 资源、多模态任务特征和多跳路径特征编码为 5 个 token，经 `mhsa_fusion.py` 融合为 `h_global`；`actor_network.py` 输出每架 UAV 对 ready tasks 的 logits，`critic_network.py` 输出状态价值 `V(s)`。
+**实现状态（2026-05-27）**：完成，已远端测试。`state_encoder.py` 将任务 DAG、网络拓扑、UAV 资源、多模态任务特征和多跳路径特征编码为 5 个 token，经 `mhsa_fusion.py` 融合为 `h_global`；`actor_network.py` 输出每架 UAV 对 ready tasks 的 logits，`critic_network.py` 输出状态价值 `V(s)`。
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -663,7 +665,7 @@ class BaseScheduler(ABC):
 
 #### 3.2.3 mA3C 训练流程
 
-**实现状态（2026-05-27）**：框架完成。`ma3c_trainer.py` 已实现 `MA3CConfig`、`compute_gae()`、`learn()` 的 rollout 统计入口和模型 checkpoint；完整异步多环境采样、反向传播更新和 target network 软更新属于 Phase 3 训练工程，会在当前接口上继续接入。
+**实现状态（2026-05-27）**：框架完成，已远端测试。`ma3c_trainer.py` 已实现 `MA3CConfig`、`compute_gae()`、`learn()` 的 rollout 统计入口和模型 checkpoint；完整异步多环境采样、反向传播更新和 target network 软更新属于 Phase 3 训练工程，会在当前接口上继续接入。
 
 ```
 超参数：
@@ -690,7 +692,7 @@ class BaseScheduler(ABC):
 
 #### 3.2.4 动作掩码机制
 
-**实现状态（2026-05-27）**：完成。环境侧 `src/env/action_mask.py` 负责生成二维可行动作掩码；算法侧 `src/algorithms/cascade/hungarian_match.py` 使用 SciPy Hungarian 在掩码内做一对一匹配，并忽略分数为 0 的候选组合。
+**实现状态（2026-05-27）**：完成，已远端测试。环境侧 `src/env/action_mask.py` 负责生成二维可行动作掩码；算法侧 `src/algorithms/cascade/hungarian_match.py` 使用 SciPy Hungarian 在掩码内做一对一匹配，并忽略分数为 0 的候选组合。
 
 对应 DECCo 原论文的 $F_t \in \{0,1\}^{U+1}$ 掩码向量，CASCADE 扩展为二维掩码矩阵 $M_t \in \{0,1\}^{N_{ready} \times U}$：
 
