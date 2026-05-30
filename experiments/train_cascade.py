@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.algorithms.cascade.config_utils import max_ready_tasks_from_config, max_uavs_from_config
 from src.algorithms.cascade.ma3c_trainer import CASCADEMA3CScheduler, MA3CConfig
+from src.algorithms.heuristic import GreedyScheduler, HEFTScheduler, MinLoadScheduler
 from src.env import CASCADEEnv
 from src.evaluation import evaluate_scheduler_details
 from src.evaluation.output import ensure_output_dir, write_json
@@ -50,6 +51,8 @@ def main() -> None:
             "max_steps": args.max_steps,
             "seed_pool_size": args.seed_pool_size,
             "rolling_window": args.rolling_window,
+            "bc_episodes": args.bc_episodes,
+            "bc_teacher": args.bc_teacher,
             "seed": args.seed,
             "checkpoint": args.checkpoint,
             "model_num_uavs": args.model_num_uavs,
@@ -77,6 +80,21 @@ def main() -> None:
     print(f"Output directory: {output_dir}")
     if args.checkpoint:
         print(f"Resuming from checkpoint: {args.checkpoint}")
+    if args.bc_episodes > 0:
+        print(f"Starting behavior cloning warm-up: teacher={args.bc_teacher}, episodes={args.bc_episodes}")
+        bc_rows = run_behavior_cloning(
+            scheduler,
+            config_path=args.config,
+            teacher_name=args.bc_teacher,
+            episodes=args.bc_episodes,
+            seed=args.seed + args.bc_seed_offset,
+            max_steps=args.max_steps,
+            seed_pool_size=args.seed_pool_size,
+            show_progress=show_progress,
+            swanlab=swanlab,
+        )
+        _write_rows(output_dir / "bc_metrics.csv", bc_rows)
+        print(f"Saved behavior cloning metrics to: {output_dir / 'bc_metrics.csv'}")
 
     episode_iter = range(args.train_episodes)
     progress_bar = None
@@ -186,6 +204,64 @@ def train_one_episode(scheduler: CASCADEMA3CScheduler, config_path: str, seed: i
     return metrics
 
 
+def run_behavior_cloning(
+    scheduler: CASCADEMA3CScheduler,
+    config_path: str,
+    teacher_name: str,
+    episodes: int,
+    seed: int,
+    max_steps: int,
+    seed_pool_size: int,
+    show_progress: bool,
+    swanlab: SwanLabLogger,
+) -> list[dict[str, float]]:
+    teacher_cls = _teacher_class(teacher_name)
+    rows = []
+    episode_iter = range(episodes)
+    if show_progress:
+        from tqdm.auto import tqdm
+
+        episode_iter = tqdm(episode_iter, desc="BC warm-up", unit="ep", dynamic_ncols=True)
+    for episode in episode_iter:
+        train_seed = seed + (episode % seed_pool_size if seed_pool_size > 0 else episode)
+        env = CASCADEEnv(config_path)
+        obs, _ = env.reset(seed=train_seed)
+        teacher = teacher_cls(env.max_ready_tasks, len(env.uavs))
+        losses = []
+        targets = []
+        entropies = []
+        total_reward = 0.0
+        terminated = False
+        truncated = False
+        steps = 0
+        while not (terminated or truncated) and steps < max_steps:
+            action_mask = obs.get("action_mask", env.get_action_mask())
+            teacher.observe(obs)
+            target_action = teacher.decide(action_mask)
+            metrics = scheduler.behavior_clone_step(obs, action_mask, target_action)
+            if metrics["bc_targets"] > 0.0:
+                losses.append(metrics["loss_bc"])
+                targets.append(metrics["bc_targets"])
+                entropies.append(metrics["bc_entropy"])
+            obs, reward, terminated, truncated, info = env.step(target_action)
+            total_reward += float(reward)
+            steps += 1
+        row = {
+            "episode": float(episode),
+            "seed": float(train_seed),
+            "loss_bc": float(sum(losses) / len(losses)) if losses else 0.0,
+            "bc_targets": float(sum(targets)),
+            "bc_entropy": float(sum(entropies) / len(entropies)) if entropies else 0.0,
+            "teacher_total_reward": total_reward,
+            "teacher_completed_tasks": float(info.get("completed_tasks", 0.0)),
+            "teacher_timed_out_tasks": float(info.get("timed_out_tasks", 0.0)),
+            "steps": float(steps),
+        }
+        rows.append(row)
+        swanlab.log_metrics("bc", row, step=episode + 1)
+    return rows
+
+
 def _build_scheduler(args: argparse.Namespace) -> CASCADEMA3CScheduler:
     env_config = load_yaml_config(args.config)
     max_ready_tasks = max_ready_tasks_from_config(env_config)
@@ -221,6 +297,14 @@ def parse_args() -> argparse.Namespace:
         help="Cycle through a fixed pool of training seeds. 0 keeps using a fresh seed every episode.",
     )
     parser.add_argument("--rolling-window", type=int, default=50, help="Window size for train_ma SwanLab metrics.")
+    parser.add_argument("--bc-episodes", type=int, default=0, help="Behavior cloning warm-up episodes before RL training.")
+    parser.add_argument(
+        "--bc-teacher",
+        choices=["greedy", "min_load", "heft"],
+        default="heft",
+        help="Heuristic teacher used for behavior cloning warm-up.",
+    )
+    parser.add_argument("--bc-seed-offset", type=int, default=100_000, help="Seed offset for behavior cloning scenarios.")
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--checkpoint", default=None, help="Optional CASCADE checkpoint to resume from.")
     parser.add_argument("--model-num-uavs", type=int, default=15, help="Fixed CASCADE model UAV capacity for cross-scenario checkpoints.")
@@ -270,6 +354,16 @@ def _rolling_means(rows) -> dict[str, float]:
         if values:
             means[key] = sum(values) / len(values)
     return means
+
+
+def _teacher_class(name: str):
+    if name == "greedy":
+        return GreedyScheduler
+    if name == "min_load":
+        return MinLoadScheduler
+    if name == "heft":
+        return HEFTScheduler
+    raise ValueError(f"Unsupported BC teacher: {name}")
 
 
 def _write_rows(path: Path, rows: list[dict[str, float]]) -> None:

@@ -131,6 +131,43 @@ class CASCADEMA3CScheduler(BaseScheduler):
             "entropy": 0.0,
         }
 
+    def behavior_clone_step(self, obs: Dict[str, np.ndarray], action_mask: np.ndarray, target_action: np.ndarray) -> Dict[str, float]:
+        self.encoder.module.train()
+        self.actor.train()
+        global_state, local_obs = self.encoder.encode_train(obs)
+        logits = self._actor_logits(global_state, local_obs)[0].transpose(0, 1)
+        padded_mask = self._pad_action_mask(action_mask)
+        padded_target = self._pad_action_mask(target_action)
+        mask = self.torch.as_tensor(padded_mask > 0.0, dtype=self.torch.bool, device=logits.device)
+        target = self.torch.as_tensor(padded_target > 0.0, dtype=self.torch.bool, device=logits.device)
+        losses = []
+        entropies = []
+        rows, cols = padded_mask.shape
+        for uav_idx in range(cols):
+            target_tasks = self.torch.nonzero(target[:rows, uav_idx] & mask[:rows, uav_idx], as_tuple=False).reshape(-1)
+            if target_tasks.numel() == 0:
+                continue
+            masked_logits = logits[:rows, uav_idx].masked_fill(~mask[:rows, uav_idx], -1e9)
+            label = target_tasks[:1].long()
+            losses.append(self.torch.nn.functional.cross_entropy(masked_logits.unsqueeze(0), label))
+            valid_probs = self.torch.softmax(masked_logits, dim=0)[mask[:rows, uav_idx]]
+            if valid_probs.numel() > 0:
+                entropies.append(-(valid_probs * valid_probs.clamp_min(1e-8).log()).sum())
+        if not losses:
+            return {"loss_bc": 0.0, "bc_targets": 0.0, "bc_entropy": 0.0}
+        loss = self.torch.stack(losses).mean()
+        self.optimizer.zero_grad()
+        loss.backward()
+        params = list(self.encoder.parameters()) + list(self.actor.parameters())
+        self.torch.nn.utils.clip_grad_norm_(params, self.config.max_grad_norm)
+        self.optimizer.step()
+        entropy = self.torch.stack(entropies).mean() if entropies else loss.detach() * 0.0
+        return {
+            "loss_bc": float(loss.detach().cpu().item()),
+            "bc_targets": float(len(losses)),
+            "bc_entropy": float(entropy.detach().cpu().item()),
+        }
+
     def learn_episode(self, traces: List[Dict], rewards: List[float], dones: List[bool], next_value: float = 0.0) -> Dict[str, float]:
         if not traces:
             return {"loss_actor": 0.0, "loss_critic": 0.0, "entropy": 0.0}

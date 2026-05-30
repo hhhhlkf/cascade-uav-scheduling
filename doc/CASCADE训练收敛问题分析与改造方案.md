@@ -690,6 +690,62 @@ python experiments/train_cascade.py \
   --swanlab-experiment cascade-ds1-from-easy-seedpool64-3000ep
 ```
 
+## 已实施的第四批改动：启发式行为克隆 warm-up
+
+如果 `ds0_easy` 和固定 seed pool 仍然不收敛，说明从零 RL 探索对当前 task-UAV 组合匹配仍然太弱。第四批加入可选行为克隆 warm-up，默认关闭，不影响原训练命令。
+
+改动：
+
+1. `CASCADEMA3CScheduler` 增加 `behavior_clone_step()`。
+   - 文件：`src/algorithms/cascade/ma3c_trainer.py`
+   - 目标：让 actor 对启发式调度器选中的 task-UAV pair 做监督学习。
+   - 只训练 encoder + actor，不训练 critic。
+
+2. `train_cascade.py` 增加参数：
+
+```text
+--bc-episodes
+--bc-teacher {heft,greedy,min_load}
+--bc-seed-offset
+```
+
+3. SwanLab 新增行为克隆曲线：
+
+```text
+bc/loss_bc
+bc/bc_targets
+bc/bc_entropy
+bc/teacher_total_reward
+bc/teacher_completed_tasks
+bc/teacher_timed_out_tasks
+```
+
+推荐先在 easy 场景跑：
+
+```bash
+python experiments/train_cascade.py \
+  --config configs/env/scenario_ds0_easy.yaml \
+  --eval-config configs/env/scenario_ds0_easy.yaml \
+  --bc-episodes 300 \
+  --bc-teacher heft \
+  --train-episodes 1000 \
+  --eval-episodes 20 \
+  --eval-every 100 \
+  --max-steps 100 \
+  --model-num-uavs 15 \
+  --seed 0 \
+  --seed-pool-size 32 \
+  --rolling-window 50 \
+  --output-dir outputs/training/cascade_ds0_easy_bc_heft_1000ep \
+  --use-swanlab \
+  --swanlab-mode cloud \
+  --swanlab-workspace Linexus \
+  --swanlab-project cascade-uav-scheduling \
+  --swanlab-experiment cascade-ds0-easy-bc-heft-1000ep
+```
+
+如果行为克隆后仍然完全不收敛，下一步不应继续调 reward，而应检查 actor 表达能力：当前 UAV-centric actor 可能无法稳定表达 task-UAV pair 匹配，需要进入 pairwise scorer 改造。
+
 ### P0：先确认不是评估随机策略
 
 必须先做：
