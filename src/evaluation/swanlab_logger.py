@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from numbers import Number
 from pathlib import Path
 from typing import Mapping
 
@@ -61,17 +62,30 @@ class SwanLabLogger:
             return
         step = int(metrics.get("episode", 0.0)) + 1
         excluded = {"episode", "seed"}
-        payload = {
-            f"episode/{method}/{key}": float(value)
-            for key, value in metrics.items()
-            if key not in excluded
-        }
+        payload = _numeric_payload(f"episode/{method}", metrics, excluded)
         self._swanlab.log(payload, step=step)
 
     def log_summary(self, method: str, metrics: Mapping[str, float], step: int | None = None) -> None:
         if not self.enabled or self._swanlab is None:
             return
-        payload = {f"summary/{method}/{key}": float(value) for key, value in metrics.items()}
+        payload = _numeric_payload(f"summary/{method}", metrics)
+        if step is None:
+            self._swanlab.log(payload)
+            return
+        self._swanlab.log(payload, step=step)
+
+    def log_metrics(
+        self,
+        prefix: str,
+        metrics: Mapping[str, float],
+        step: int | None = None,
+        excluded: set[str] | None = None,
+    ) -> None:
+        if not self.enabled or self._swanlab is None:
+            return
+        payload = _numeric_payload(prefix, metrics, excluded or {"episode", "seed"})
+        if not payload:
+            return
         if step is None:
             self._swanlab.log(payload)
             return
@@ -83,3 +97,13 @@ class SwanLabLogger:
         finish = getattr(self._swanlab, "finish", None)
         if callable(finish):
             finish()
+
+
+def _numeric_payload(prefix: str, metrics: Mapping[str, float], excluded: set[str] | None = None) -> dict[str, float]:
+    excluded = excluded or set()
+    payload: dict[str, float] = {}
+    for key, value in metrics.items():
+        if key in excluded or not isinstance(value, Number):
+            continue
+        payload[f"{prefix}/{key}"] = float(value)
+    return payload

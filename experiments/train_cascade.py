@@ -14,6 +14,7 @@ from src.algorithms.cascade.ma3c_trainer import CASCADEMA3CScheduler, MA3CConfig
 from src.env import CASCADEEnv
 from src.evaluation import evaluate_scheduler_details
 from src.evaluation.output import ensure_output_dir, write_json
+from src.evaluation.swanlab_logger import SwanLabLogger
 from src.utils.config import load_yaml_config
 from src.utils.gpu import require_cuda_device
 
@@ -21,15 +22,44 @@ from src.utils.gpu import require_cuda_device
 def main() -> None:
     args = parse_args()
     show_progress = not args.no_progress
+    device_info = {}
     if not args.no_require_gpu:
-        device = require_cuda_device()
+        device_info = require_cuda_device()
         print(
             "GPU ready: "
-            f"{device['device_name']} "
-            f"(torch={device['torch_version']}, cuda={device['cuda_version']})"
+            f"{device_info['device_name']} "
+            f"(torch={device_info['torch_version']}, cuda={device_info['cuda_version']})"
         )
     output_dir = ensure_output_dir(args.output_dir or _default_output_dir())
     scheduler = _build_scheduler(args)
+    swanlab = SwanLabLogger(
+        enabled=args.use_swanlab,
+        project=args.swanlab_project,
+        experiment_name=args.swanlab_experiment,
+        mode=args.swanlab_mode,
+        logdir=output_dir / "swanlab",
+        workspace=args.swanlab_workspace,
+        load=args.swanlab_load,
+        config={
+            "train_config": args.config,
+            "eval_config": args.eval_config,
+            "train_episodes": args.train_episodes,
+            "eval_episodes": args.eval_episodes,
+            "eval_every": args.eval_every,
+            "max_steps": args.max_steps,
+            "seed": args.seed,
+            "checkpoint": args.checkpoint,
+            "model_num_uavs": args.model_num_uavs,
+            "actor_lr": args.actor_lr,
+            "critic_lr": args.critic_lr,
+            "entropy_coef": args.entropy_coef,
+            "gamma": args.gamma,
+            "gae_lambda": args.gae_lambda,
+            "token_dim": args.token_dim,
+            "hidden_dim": args.hidden_dim,
+            "device": device_info,
+        },
+    )
     train_rows = []
     eval_history = []
     print(
@@ -61,6 +91,7 @@ def main() -> None:
         row["episode"] = episode
         row["seed"] = args.seed + episode
         train_rows.append(row)
+        swanlab.log_metrics("train", row, step=episode + 1)
         if progress_bar is not None:
             progress_bar.set_postfix(
                 {
@@ -88,6 +119,7 @@ def main() -> None:
             )
             eval_row = {"episode": episode, **eval_result["summary"]}
             eval_history.append(eval_row)
+            swanlab.log_metrics("eval", eval_row, step=episode + 1)
             _progress_write(
                 progress_bar,
                 json.dumps({"train": row, "eval": eval_row}, ensure_ascii=False, sort_keys=True),
@@ -101,6 +133,7 @@ def main() -> None:
     print(f"Saved training metrics to: {output_dir / 'train_metrics.csv'}")
     print(f"Saved evaluation metrics to: {output_dir / 'eval_metrics.csv'}")
     print(f"Saved training outputs to: {output_dir}")
+    swanlab.finish()
 
 
 def train_one_episode(scheduler: CASCADEMA3CScheduler, config_path: str, seed: int, max_steps: int) -> dict[str, float]:
@@ -171,6 +204,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-num-uavs", type=int, default=15, help="Fixed CASCADE model UAV capacity for cross-scenario checkpoints.")
     parser.add_argument("--no-require-gpu", action="store_true")
     parser.add_argument("--no-progress", action="store_true", help="Disable tqdm progress bars.")
+    parser.add_argument("--use-swanlab", action="store_true", help="Enable SwanLab training logging.")
+    parser.add_argument("--swanlab-project", default="cascade-uav-scheduling", help="SwanLab project name.")
+    parser.add_argument("--swanlab-workspace", default="Linexus", help="SwanLab workspace name.")
+    parser.add_argument("--swanlab-experiment", default="cascade-ma3c-train", help="SwanLab experiment name.")
+    parser.add_argument("--swanlab-load", default=None, help="Optional SwanLab load config path.")
+    parser.add_argument(
+        "--swanlab-mode",
+        default="cloud",
+        choices=["cloud", "local", "offline", "disabled"],
+        help="SwanLab mode. Use cloud after swanlab login; offline is safe for servers.",
+    )
     parser.add_argument("--actor-lr", type=float, default=3e-4)
     parser.add_argument("--critic-lr", type=float, default=1e-3)
     parser.add_argument("--entropy-coef", type=float, default=0.01)
