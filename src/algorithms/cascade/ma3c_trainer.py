@@ -17,9 +17,10 @@ from src.algorithms.cascade.state_encoder import CASCADEStateEncoder
 class MA3CConfig:
     gamma: float = 0.99
     gae_lambda: float = 0.95
-    entropy_coef: float = 0.05
-    actor_lr: float = 3e-4
-    critic_lr: float = 1e-3
+    entropy_coef: float = 0.01
+    actor_lr: float = 1e-4
+    critic_lr: float = 3e-4
+    rl_bc_coef: float = 0.1
     n_steps: int = 128
     max_grad_norm: float = 0.5
     token_dim: int = 64
@@ -133,38 +134,18 @@ class CASCADEMA3CScheduler(BaseScheduler):
     def behavior_clone_step(self, obs: Dict[str, np.ndarray], action_mask: np.ndarray, target_action: np.ndarray) -> Dict[str, float]:
         self.encoder.module.train()
         self.actor.train()
-        global_state, local_obs = self.encoder.encode_train(obs)
-        logits = self._actor_logits(global_state, obs)[0].transpose(0, 1)
-        padded_mask = self._pad_action_mask(action_mask)
-        padded_target = self._pad_action_mask(target_action)
-        mask = self.torch.as_tensor(padded_mask > 0.0, dtype=self.torch.bool, device=logits.device)
-        target = self.torch.as_tensor(padded_target > 0.0, dtype=self.torch.bool, device=logits.device)
-        losses = []
-        entropies = []
-        rows, cols = padded_mask.shape
-        for uav_idx in range(cols):
-            target_tasks = self.torch.nonzero(target[:rows, uav_idx] & mask[:rows, uav_idx], as_tuple=False).reshape(-1)
-            if target_tasks.numel() == 0:
-                continue
-            masked_logits = logits[:rows, uav_idx].masked_fill(~mask[:rows, uav_idx], -1e9)
-            label = target_tasks[:1].long()
-            losses.append(self.torch.nn.functional.cross_entropy(masked_logits.unsqueeze(0), label))
-            valid_probs = self.torch.softmax(masked_logits, dim=0)[mask[:rows, uav_idx]]
-            if valid_probs.numel() > 0:
-                entropies.append(-(valid_probs * valid_probs.clamp_min(1e-8).log()).sum())
-        if not losses:
+        bc_loss, bc_targets, bc_entropy = self._behavior_clone_loss(obs, action_mask, target_action)
+        if bc_targets <= 0.0:
             return {"loss_bc": 0.0, "bc_targets": 0.0, "bc_entropy": 0.0}
-        loss = self.torch.stack(losses).mean()
         self.optimizer.zero_grad()
-        loss.backward()
+        bc_loss.backward()
         params = list(self.encoder.parameters()) + list(self.actor.parameters())
         self.torch.nn.utils.clip_grad_norm_(params, self.config.max_grad_norm)
         self.optimizer.step()
-        entropy = self.torch.stack(entropies).mean() if entropies else loss.detach() * 0.0
         return {
-            "loss_bc": float(loss.detach().cpu().item()),
-            "bc_targets": float(len(losses)),
-            "bc_entropy": float(entropy.detach().cpu().item()),
+            "loss_bc": float(bc_loss.detach().cpu().item()),
+            "bc_targets": float(bc_targets),
+            "bc_entropy": float(bc_entropy.detach().cpu().item()),
         }
 
     def learn_episode(self, traces: List[Dict], rewards: List[float], dones: List[bool], next_value: float = 0.0) -> Dict[str, float]:
@@ -189,7 +170,12 @@ class CASCADEMA3CScheduler(BaseScheduler):
         actor_loss = -(log_probs * advantages.detach()).mean()
         critic_loss = self.torch.nn.functional.smooth_l1_loss(values, returns)
         entropy = entropies.mean()
-        loss = actor_loss + 0.5 * critic_loss - self.config.entropy_coef * entropy
+        rl_bc_losses = [trace["bc_loss"] for trace in traces if "bc_loss" in trace]
+        if rl_bc_losses:
+            rl_bc_loss = self.torch.stack(rl_bc_losses).mean()
+        else:
+            rl_bc_loss = actor_loss.detach() * 0.0
+        loss = actor_loss + 0.5 * critic_loss - self.config.entropy_coef * entropy + self.config.rl_bc_coef * rl_bc_loss
         self.optimizer.zero_grad()
         loss.backward()
         params = list(self.encoder.parameters()) + list(self.actor.parameters()) + list(self.critic.parameters())
@@ -199,6 +185,7 @@ class CASCADEMA3CScheduler(BaseScheduler):
             "loss_actor": float(actor_loss.detach().cpu().item()),
             "loss_critic": float(critic_loss.detach().cpu().item()),
             "entropy": float(entropy.detach().cpu().item()),
+            "loss_rl_bc": float(rl_bc_loss.detach().cpu().item()),
             "advantage_mean": float(np.mean(advantages_np)) if advantages_np.size else 0.0,
             "return_mean": float(np.mean(returns_np)) if returns_np.size else 0.0,
         }
@@ -252,6 +239,33 @@ class CASCADEMA3CScheduler(BaseScheduler):
             device=task_resources.device,
         )
         return task_resources / scale.clamp_min(1e-6)
+
+    def _behavior_clone_loss(self, obs: Dict[str, np.ndarray], action_mask: np.ndarray, target_action: np.ndarray):
+        global_state, _ = self.encoder.encode_train(obs)
+        logits = self._actor_logits(global_state, obs)[0].transpose(0, 1)
+        padded_mask = self._pad_action_mask(action_mask)
+        padded_target = self._pad_action_mask(target_action)
+        mask = self.torch.as_tensor(padded_mask > 0.0, dtype=self.torch.bool, device=logits.device)
+        target = self.torch.as_tensor(padded_target > 0.0, dtype=self.torch.bool, device=logits.device)
+        losses = []
+        entropies = []
+        rows, cols = padded_mask.shape
+        for uav_idx in range(cols):
+            target_tasks = self.torch.nonzero(target[:rows, uav_idx] & mask[:rows, uav_idx], as_tuple=False).reshape(-1)
+            if target_tasks.numel() == 0:
+                continue
+            masked_logits = logits[:rows, uav_idx].masked_fill(~mask[:rows, uav_idx], -1e9)
+            label = target_tasks[:1].long()
+            losses.append(self.torch.nn.functional.cross_entropy(masked_logits.unsqueeze(0), label))
+            valid_probs = self.torch.softmax(masked_logits, dim=0)[mask[:rows, uav_idx]]
+            if valid_probs.numel() > 0:
+                entropies.append(-(valid_probs * valid_probs.clamp_min(1e-8).log()).sum())
+        if not losses:
+            zero = logits.sum() * 0.0
+            return zero, 0.0, zero
+        loss = self.torch.stack(losses).mean()
+        entropy = self.torch.stack(entropies).mean() if entropies else loss.detach() * 0.0
+        return loss, float(len(losses)), entropy
 
     def _masked_task_probabilities(self, logits, action_mask: np.ndarray) -> np.ndarray:
         return self._masked_task_probabilities_tensor(logits, action_mask).detach().cpu().numpy().astype(np.float32)

@@ -4,7 +4,8 @@ class_path: src.algorithms.cascade.ma3c_trainer.CASCADEMA3CScheduler
 hyperparameters:
   gamma: 0.99
   gae_lambda: 0.95
-  entropy_coef: 0.05
-  actor_lr: 0.0003
-  critic_lr: 0.001
+  entropy_coef: 0.01
+  actor_lr: 0.0001
+  critic_lr: 0.0003
+  rl_bc_coef: 0.1
   n_steps: 128

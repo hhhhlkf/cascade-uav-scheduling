@@ -905,6 +905,80 @@ python experiments/train_cascade.py \
   --swanlab-experiment cascade-pairwise-ds0-easy-bc-rl
 ```
 
+## 已实施的第七批改动：保守 RL 微调与教师锚定
+
+如果 pairwise actor 的 `bc/loss_bc` 能下降，但一进入 RL 后所有指标都反向变化，原因通常是：BC 已学到启发式策略，但 RL 阶段的随机采样、较大 actor 更新和熵探索把策略迅速冲坏。
+
+因此第七批做两类调整：
+
+1. 回退为保守 RL 超参。
+   - `actor_lr`: `3e-4` -> `1e-4`
+   - `critic_lr`: `1e-3` -> `3e-4`
+   - `entropy_coef`: `0.05` -> `0.01`
+
+2. RL 阶段加入教师锚定 loss。
+   - 新参数：`--rl-bc-coef`，默认 `0.1`
+   - 新参数：`--rl-bc-teacher`，默认 `heft`
+   - 每个 RL step 会额外计算当前策略对老师动作的 BC loss，并加入总 loss：
+
+```text
+loss =
+  actor_loss
++ 0.5 * critic_loss
+- entropy_coef * entropy
++ rl_bc_coef * rl_bc_loss
+```
+
+新增训练日志：
+
+```text
+train/loss_rl_bc
+train/rl_bc_targets
+train/rl_bc_entropy
+```
+
+推荐命令：
+
+```bash
+python experiments/train_cascade.py \
+  --config configs/env/scenario_ds0_easy.yaml \
+  --eval-config configs/env/scenario_ds0_easy.yaml \
+  --bc-episodes 300 \
+  --bc-epochs 10 \
+  --bc-max-transitions 5000 \
+  --bc-teacher heft \
+  --train-episodes 1000 \
+  --eval-episodes 20 \
+  --eval-every 100 \
+  --max-steps 100 \
+  --model-num-uavs 15 \
+  --seed 0 \
+  --seed-pool-size 32 \
+  --rolling-window 50 \
+  --actor-lr 1e-4 \
+  --critic-lr 3e-4 \
+  --entropy-coef 0.01 \
+  --rl-bc-coef 0.1 \
+  --rl-bc-teacher heft \
+  --output-dir outputs/training/cascade_pairwise_ds0_easy_bc_rl_anchor \
+  --use-swanlab \
+  --swanlab-mode cloud \
+  --swanlab-workspace Linexus \
+  --swanlab-project cascade-uav-scheduling \
+  --swanlab-experiment cascade-pairwise-ds0-easy-bc-rl-anchor
+```
+
+判断：
+
+```text
+eval/completion_ratio_mean 不应下降
+eval/timed_out_tasks_mean 不应上升
+train/loss_rl_bc 不应快速变大
+train/entropy 不应过高
+```
+
+如果这一步稳定，但仍无法超过老师，再逐步降低 `--rl-bc-coef`，例如 `0.1 -> 0.05 -> 0.02`，释放策略探索空间。
+
 ### P0：先确认不是评估随机策略
 
 必须先做：

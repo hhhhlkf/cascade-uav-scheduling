@@ -63,6 +63,8 @@ def main() -> None:
             "actor_lr": args.actor_lr,
             "critic_lr": args.critic_lr,
             "entropy_coef": args.entropy_coef,
+            "rl_bc_coef": args.rl_bc_coef,
+            "rl_bc_teacher": args.rl_bc_teacher,
             "gamma": args.gamma,
             "gae_lambda": args.gae_lambda,
             "token_dim": args.token_dim,
@@ -121,6 +123,7 @@ def main() -> None:
             config_path=args.config,
             seed=train_seed,
             max_steps=args.max_steps,
+            rl_bc_teacher_name=args.rl_bc_teacher if args.rl_bc_coef > 0.0 else None,
         )
         row["episode"] = episode
         row["seed"] = train_seed
@@ -174,9 +177,16 @@ def main() -> None:
     swanlab.finish()
 
 
-def train_one_episode(scheduler: CASCADEMA3CScheduler, config_path: str, seed: int, max_steps: int) -> dict[str, float]:
+def train_one_episode(
+    scheduler: CASCADEMA3CScheduler,
+    config_path: str,
+    seed: int,
+    max_steps: int,
+    rl_bc_teacher_name: str | None = None,
+) -> dict[str, float]:
     env = CASCADEEnv(config_path)
     obs, info = env.reset(seed=seed)
+    teacher = _teacher_class(rl_bc_teacher_name)(env.max_ready_tasks, len(env.uavs)) if rl_bc_teacher_name else None
     traces = []
     rewards = []
     dones = []
@@ -189,6 +199,14 @@ def train_one_episode(scheduler: CASCADEMA3CScheduler, config_path: str, seed: i
     while not (terminated or truncated) and steps < max_steps:
         action_mask = obs.get("action_mask", env.get_action_mask())
         action, trace = scheduler.decide_with_trace(obs, action_mask)
+        if teacher is not None:
+            teacher.observe(obs)
+            target_action = teacher.decide(action_mask)
+            bc_loss, bc_targets, bc_entropy = scheduler._behavior_clone_loss(obs, action_mask, target_action)
+            if bc_targets > 0.0:
+                trace["bc_loss"] = bc_loss
+                trace["rl_bc_targets"] = bc_targets
+                trace["rl_bc_entropy"] = bc_entropy
         obs, reward, terminated, truncated, info = env.step(action)
         done = bool(terminated or truncated)
         traces.append(trace)
@@ -200,6 +218,8 @@ def train_one_episode(scheduler: CASCADEMA3CScheduler, config_path: str, seed: i
                 reward_parts_sum[f"{key}_sum"] = reward_parts_sum.get(f"{key}_sum", 0.0) + float(value)
         steps += 1
     metrics = scheduler.learn_episode(traces, rewards, dones)
+    rl_bc_targets = [float(trace.get("rl_bc_targets", 0.0)) for trace in traces]
+    rl_bc_entropies = [trace["rl_bc_entropy"].detach().cpu().item() for trace in traces if "rl_bc_entropy" in trace]
     metrics.update(
         {
             "total_reward": total_reward,
@@ -208,6 +228,8 @@ def train_one_episode(scheduler: CASCADEMA3CScheduler, config_path: str, seed: i
             "timed_out_tasks": float(info.get("timed_out_tasks", 0.0)),
             "makespan_s": float(info.get("makespan_s", 0.0)),
             "atct_s": float(info.get("atct_s", 0.0)),
+            "rl_bc_targets": float(sum(rl_bc_targets)),
+            "rl_bc_entropy": float(sum(rl_bc_entropies) / len(rl_bc_entropies)) if rl_bc_entropies else 0.0,
         }
     )
     metrics.update(reward_parts_sum)
@@ -317,6 +339,7 @@ def _build_scheduler(args: argparse.Namespace) -> CASCADEMA3CScheduler:
         actor_lr=args.actor_lr,
         critic_lr=args.critic_lr,
         entropy_coef=args.entropy_coef,
+        rl_bc_coef=args.rl_bc_coef,
         gamma=args.gamma,
         gae_lambda=args.gae_lambda,
         token_dim=args.token_dim,
@@ -370,9 +393,16 @@ def parse_args() -> argparse.Namespace:
         choices=["cloud", "local", "offline", "disabled"],
         help="SwanLab mode. Use cloud after swanlab login; offline is safe for servers.",
     )
-    parser.add_argument("--actor-lr", type=float, default=3e-4)
-    parser.add_argument("--critic-lr", type=float, default=1e-3)
-    parser.add_argument("--entropy-coef", type=float, default=0.05)
+    parser.add_argument("--actor-lr", type=float, default=1e-4)
+    parser.add_argument("--critic-lr", type=float, default=3e-4)
+    parser.add_argument("--entropy-coef", type=float, default=0.01)
+    parser.add_argument("--rl-bc-coef", type=float, default=0.1, help="Teacher anchoring loss weight during RL fine-tuning.")
+    parser.add_argument(
+        "--rl-bc-teacher",
+        choices=["greedy", "min_load", "heft"],
+        default="heft",
+        help="Teacher used to anchor RL updates when --rl-bc-coef > 0.",
+    )
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--gae-lambda", type=float, default=0.95)
     parser.add_argument("--token-dim", type=int, default=64)
