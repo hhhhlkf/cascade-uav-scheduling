@@ -7,7 +7,7 @@ from typing import Dict, List
 import numpy as np
 
 from src.algorithms.base_scheduler import BaseScheduler
-from src.algorithms.cascade.actor_network import build_actor
+from src.algorithms.cascade.actor_network import build_pairwise_actor
 from src.algorithms.cascade.critic_network import build_critic
 from src.algorithms.cascade.hungarian_match import masked_assignment
 from src.algorithms.cascade.state_encoder import CASCADEStateEncoder
@@ -67,10 +67,9 @@ class CASCADEMA3CScheduler(BaseScheduler):
             device=self.config.device,
         )
         self.torch = self.encoder.torch
-        self.actor = build_actor(
-            self.encoder.global_dim + self.encoder.local_dim,
+        self.actor = build_pairwise_actor(
+            self.encoder.global_dim + 8 + self.encoder.local_dim + 6,
             self.config.hidden_dim,
-            max_ready_tasks,
         ).to(self.encoder.device)
         self.critic = build_critic(self.encoder.global_dim, self.config.hidden_dim).to(self.encoder.device)
         self.optimizer = self.torch.optim.Adam(
@@ -89,7 +88,7 @@ class CASCADEMA3CScheduler(BaseScheduler):
         self.actor.eval()
         with self.torch.no_grad():
             global_state, local_obs = self.encoder.encode(self.last_obs)
-            logits = self._actor_logits(global_state, local_obs)[0].transpose(0, 1)
+            logits = self._actor_logits(global_state, self.last_obs)[0].transpose(0, 1)
             padded_mask = self._pad_action_mask(action_mask)
             scores = self._masked_task_probabilities(logits, padded_mask)[: action_mask.shape[0], : action_mask.shape[1]]
         for task_idx, uav_idx in masked_assignment(scores, action_mask):
@@ -101,7 +100,7 @@ class CASCADEMA3CScheduler(BaseScheduler):
         self.actor.train()
         self.critic.train()
         global_state, local_obs = self.encoder.encode_train(obs)
-        logits = self._actor_logits(global_state, local_obs)[0].transpose(0, 1)
+        logits = self._actor_logits(global_state, obs)[0].transpose(0, 1)
         value = self.critic(global_state).squeeze()
         padded_mask = self._pad_action_mask(action_mask)
         probs = self._masked_task_probabilities_tensor(logits, padded_mask)
@@ -135,7 +134,7 @@ class CASCADEMA3CScheduler(BaseScheduler):
         self.encoder.module.train()
         self.actor.train()
         global_state, local_obs = self.encoder.encode_train(obs)
-        logits = self._actor_logits(global_state, local_obs)[0].transpose(0, 1)
+        logits = self._actor_logits(global_state, obs)[0].transpose(0, 1)
         padded_mask = self._pad_action_mask(action_mask)
         padded_target = self._pad_action_mask(target_action)
         mask = self.torch.as_tensor(padded_mask > 0.0, dtype=self.torch.bool, device=logits.device)
@@ -230,11 +229,29 @@ class CASCADEMA3CScheduler(BaseScheduler):
             global_state, _ = self.encoder.encode(obs)
             return float(self.critic(global_state).squeeze().detach().cpu().item())
 
-    def _actor_logits(self, global_state, local_obs):
+    def _actor_logits(self, global_state, obs: Dict[str, np.ndarray]):
+        task_features = self.encoder._to_tensor("task_features", obs["task_features"])
+        uav_features = self.encoder._to_tensor("uav_features", obs["uav_features"])
+        multihop_features = self.encoder._to_tensor("multihop_features", obs["multihop_features"])
+        local_obs = self.torch.cat([uav_features, multihop_features], dim=-1)
         batch, num_uavs, _ = local_obs.shape
-        global_per_uav = global_state.unsqueeze(1).expand(batch, num_uavs, global_state.shape[-1])
-        actor_input = self.torch.cat([global_per_uav, local_obs], dim=-1)
-        return self.actor(actor_input.reshape(batch * num_uavs, -1)).reshape(batch, num_uavs, self.max_ready_tasks)
+        num_tasks = task_features.shape[1]
+        global_pair = global_state.unsqueeze(1).unsqueeze(2).expand(batch, num_uavs, num_tasks, global_state.shape[-1])
+        task_pair = task_features.unsqueeze(1).expand(batch, num_uavs, num_tasks, task_features.shape[-1])
+        uav_pair = local_obs.unsqueeze(2).expand(batch, num_uavs, num_tasks, local_obs.shape[-1])
+        task_resource = self._normalized_task_resources(task_features[:, :, :6])
+        resource_margin = uav_features[:, :, None, 2:8] - task_resource[:, None, :, :]
+        pair_input = self.torch.cat([global_pair, task_pair, uav_pair, resource_margin], dim=-1)
+        logits = self.actor(pair_input.reshape(batch * num_uavs * num_tasks, -1)).reshape(batch, num_uavs, num_tasks)
+        return logits
+
+    def _normalized_task_resources(self, task_resources):
+        scale = self.torch.as_tensor(
+            [1.0, 1.0, 16.0, 512.0, 200.0, 1.0],
+            dtype=task_resources.dtype,
+            device=task_resources.device,
+        )
+        return task_resources / scale.clamp_min(1e-6)
 
     def _masked_task_probabilities(self, logits, action_mask: np.ndarray) -> np.ndarray:
         return self._masked_task_probabilities_tensor(logits, action_mask).detach().cpu().numpy().astype(np.float32)

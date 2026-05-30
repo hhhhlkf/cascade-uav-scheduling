@@ -798,6 +798,113 @@ bc/dataset_size 应该稳定为收集到的 transition 数
 
 如果数据集化 BC 的 `bc/loss_bc` 仍然不下降，说明当前 actor 的 UAV-centric 输出结构无法稳定模仿启发式 task-UAV pair 匹配。下一步应进入结构改造：改为 task-UAV pairwise scorer，而不是继续调整 reward。
 
+## 已实施的第六批改动：Pairwise Actor Scorer
+
+数据集化 BC 仍不收敛后，基本可以判断当前 UAV-centric actor 结构不适合表达 task-UAV pair 匹配。第六批将 actor 从“每个 UAV 输出所有任务 logits”改为“每个 task-UAV pair 独立打分”。
+
+旧结构：
+
+```text
+actor_input = concat(global_state, uav_local_obs)
+actor_output = logits over tasks
+```
+
+问题：
+
+- task 信息只通过全局 token 间接进入 actor。
+- actor 没有直接看到某个任务和某架 UAV 的资源/传感器/优先级组合。
+- BC 的监督目标是 task-UAV pair，但网络输出结构是 UAV-centric task list，表达不够直接。
+
+新结构：
+
+```text
+pair_input_ij = concat(
+  global_state,
+  task_features_i,
+  uav_features_j + multihop_features_j,
+  normalized_resource_margin_ij
+)
+
+score_ij = MLP(pair_input_ij)
+```
+
+其中：
+
+```text
+normalized_resource_margin_ij = normalized_uav_available_resource_j - normalized_task_requirement_i
+```
+
+修改位置：
+
+- `src/algorithms/cascade/actor_network.py`
+  - 新增 `build_pairwise_actor()`
+- `src/algorithms/cascade/ma3c_trainer.py`
+  - `_actor_logits()` 改为构造 `[task, uav]` pair 输入并输出 pair score
+  - `decide()`、`decide_with_trace()`、`behavior_clone_step()` 继续复用原有 mask、采样、BC loss 逻辑
+
+注意：
+
+旧 UAV-centric actor checkpoint 与新 pairwise actor 结构不兼容。建议从头训练或从新结构 checkpoint 继续训练。
+
+推荐先只跑 BC 验证，不跑长 RL：
+
+```bash
+python experiments/train_cascade.py \
+  --config configs/env/scenario_ds0_easy.yaml \
+  --eval-config configs/env/scenario_ds0_easy.yaml \
+  --bc-episodes 300 \
+  --bc-epochs 10 \
+  --bc-max-transitions 5000 \
+  --bc-teacher heft \
+  --train-episodes 0 \
+  --eval-episodes 1 \
+  --eval-every 1 \
+  --max-steps 100 \
+  --model-num-uavs 15 \
+  --seed 0 \
+  --seed-pool-size 32 \
+  --rolling-window 50 \
+  --output-dir outputs/training/cascade_pairwise_bc_probe \
+  --use-swanlab \
+  --swanlab-mode cloud \
+  --swanlab-workspace Linexus \
+  --swanlab-project cascade-uav-scheduling \
+  --swanlab-experiment cascade-pairwise-bc-probe
+```
+
+预期：
+
+```text
+bc/loss_bc 应该明显下降
+bc/bc_entropy 应该下降
+```
+
+如果 pairwise actor 的 BC loss 能下降，再跑 RL：
+
+```bash
+python experiments/train_cascade.py \
+  --config configs/env/scenario_ds0_easy.yaml \
+  --eval-config configs/env/scenario_ds0_easy.yaml \
+  --bc-episodes 300 \
+  --bc-epochs 10 \
+  --bc-max-transitions 5000 \
+  --bc-teacher heft \
+  --train-episodes 1000 \
+  --eval-episodes 20 \
+  --eval-every 100 \
+  --max-steps 100 \
+  --model-num-uavs 15 \
+  --seed 0 \
+  --seed-pool-size 32 \
+  --rolling-window 50 \
+  --output-dir outputs/training/cascade_pairwise_ds0_easy_bc_rl \
+  --use-swanlab \
+  --swanlab-mode cloud \
+  --swanlab-workspace Linexus \
+  --swanlab-project cascade-uav-scheduling \
+  --swanlab-experiment cascade-pairwise-ds0-easy-bc-rl
+```
+
 ### P0：先确认不是评估随机策略
 
 必须先做：

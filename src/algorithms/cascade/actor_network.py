@@ -21,3 +21,14 @@ def build_actor(input_dim: int, hidden_dim: int, max_ready_tasks: int):
         nn.Linear(hidden_dim, max_ready_tasks),
     )
 
+
+def build_pairwise_actor(input_dim: int, hidden_dim: int):
+    """Build a task-UAV pair scorer that outputs one logit per feasible pair."""
+    _, nn = _require_torch()
+    return nn.Sequential(
+        nn.Linear(input_dim, hidden_dim),
+        nn.ReLU(),
+        nn.Linear(hidden_dim, hidden_dim),
+        nn.ReLU(),
+        nn.Linear(hidden_dim, 1),
+    )
