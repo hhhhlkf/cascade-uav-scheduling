@@ -20,6 +20,7 @@ from src.utils.gpu import require_cuda_device
 
 def main() -> None:
     args = parse_args()
+    show_progress = not args.no_progress
     if not args.no_require_gpu:
         device = require_cuda_device()
         print(
@@ -31,8 +32,26 @@ def main() -> None:
     scheduler = _build_scheduler(args)
     train_rows = []
     eval_history = []
+    print(
+        "Starting CASCADE training: "
+        f"train_episodes={args.train_episodes}, eval_every={args.eval_every}, "
+        f"eval_episodes={args.eval_episodes}, max_steps={args.max_steps}, seed={args.seed}"
+    )
+    print(f"Training config: {args.config}")
+    print(f"Evaluation config: {args.eval_config}")
+    print(f"Output directory: {output_dir}")
+    if args.checkpoint:
+        print(f"Resuming from checkpoint: {args.checkpoint}")
 
-    for episode in range(args.train_episodes):
+    episode_iter = range(args.train_episodes)
+    progress_bar = None
+    if show_progress:
+        from tqdm.auto import tqdm
+
+        progress_bar = tqdm(episode_iter, desc="Training episodes", unit="ep", dynamic_ncols=True)
+        episode_iter = progress_bar
+
+    for episode in episode_iter:
         row = train_one_episode(
             scheduler,
             config_path=args.config,
@@ -42,28 +61,51 @@ def main() -> None:
         row["episode"] = episode
         row["seed"] = args.seed + episode
         train_rows.append(row)
+        if progress_bar is not None:
+            progress_bar.set_postfix(
+                {
+                    "reward": f"{row.get('total_reward', 0.0):.3f}",
+                    "actor": f"{row.get('loss_actor', 0.0):.3f}",
+                    "critic": f"{row.get('loss_critic', 0.0):.3f}",
+                    "entropy": f"{row.get('entropy', 0.0):.3f}",
+                    "done": int(row.get("completed_tasks", 0.0)),
+                    "timeout": int(row.get("timed_out_tasks", 0.0)),
+                }
+            )
         if (episode + 1) % args.eval_every == 0 or episode == args.train_episodes - 1:
+            _progress_write(
+                progress_bar,
+                f"Running evaluation at episode {episode + 1}/{args.train_episodes} "
+                f"({args.eval_episodes} episodes)...",
+            )
             eval_result = evaluate_scheduler_details(
                 args.eval_config,
                 lambda max_ready, num_uavs: scheduler,
                 episodes=args.eval_episodes,
                 seed=args.seed + 10_000 + episode,
-                show_progress=False,
+                show_progress=show_progress,
+                progress_desc=f"Eval after ep {episode + 1}",
             )
             eval_row = {"episode": episode, **eval_result["summary"]}
             eval_history.append(eval_row)
-            print(json.dumps({"train": row, "eval": eval_row}, ensure_ascii=False, sort_keys=True))
+            _progress_write(
+                progress_bar,
+                json.dumps({"train": row, "eval": eval_row}, ensure_ascii=False, sort_keys=True),
+            )
 
     scheduler.save(output_dir / "cascade_ma3c.pt")
     _write_rows(output_dir / "train_metrics.csv", train_rows)
     _write_rows(output_dir / "eval_metrics.csv", eval_history)
     write_json(output_dir / "train_metrics.json", {"train": train_rows, "eval": eval_history})
+    print(f"Saved checkpoint to: {output_dir / 'cascade_ma3c.pt'}")
+    print(f"Saved training metrics to: {output_dir / 'train_metrics.csv'}")
+    print(f"Saved evaluation metrics to: {output_dir / 'eval_metrics.csv'}")
     print(f"Saved training outputs to: {output_dir}")
 
 
 def train_one_episode(scheduler: CASCADEMA3CScheduler, config_path: str, seed: int, max_steps: int) -> dict[str, float]:
     env = CASCADEEnv(config_path)
-    obs, _ = env.reset(seed=seed)
+    obs, info = env.reset(seed=seed)
     traces = []
     rewards = []
     dones = []
@@ -128,6 +170,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint", default=None, help="Optional CASCADE checkpoint to resume from.")
     parser.add_argument("--model-num-uavs", type=int, default=15, help="Fixed CASCADE model UAV capacity for cross-scenario checkpoints.")
     parser.add_argument("--no-require-gpu", action="store_true")
+    parser.add_argument("--no-progress", action="store_true", help="Disable tqdm progress bars.")
     parser.add_argument("--actor-lr", type=float, default=3e-4)
     parser.add_argument("--critic-lr", type=float, default=1e-3)
     parser.add_argument("--entropy-coef", type=float, default=0.01)
@@ -136,6 +179,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--token-dim", type=int, default=64)
     parser.add_argument("--hidden-dim", type=int, default=128)
     return parser.parse_args()
+
+
+def _progress_write(progress_bar, message: str) -> None:
+    if progress_bar is not None:
+        progress_bar.write(message)
+        return
+    print(message)
 
 
 def _write_rows(path: Path, rows: list[dict[str, float]]) -> None:
