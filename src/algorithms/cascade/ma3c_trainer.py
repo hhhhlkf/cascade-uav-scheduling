@@ -17,7 +17,7 @@ from src.algorithms.cascade.state_encoder import CASCADEStateEncoder
 class MA3CConfig:
     gamma: float = 0.99
     gae_lambda: float = 0.95
-    entropy_coef: float = 0.01
+    entropy_coef: float = 0.05
     actor_lr: float = 3e-4
     critic_lr: float = 1e-3
     n_steps: int = 128

@@ -17,6 +17,9 @@ DEFAULT_REWARD_WEIGHTS = {
     "lambda_priority": 0.20,
     "completed_bonus": 1.0,
     "timeout_penalty": 2.0,
+    "terminal_completion_bonus": 5.0,
+    "terminal_tdsr_bonus": 2.0,
+    "terminal_timeout_penalty": 5.0,
 }
 
 

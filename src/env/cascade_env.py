@@ -153,6 +153,9 @@ class CASCADEEnv(gym.Env):
         )
         terminated = self.task_manager.all_terminal()
         truncated = self.step_count >= self.max_steps or self.sim_time_s >= self._simulation_duration_s()
+        terminal_reward = self._terminal_reward() if terminated or truncated else 0.0
+        reward += terminal_reward
+        reward_parts["reward_terminal"] = terminal_reward
         obs = self._observe()
         info = self._info()
         info.update(reward_parts)
@@ -165,6 +168,25 @@ class CASCADEEnv(gym.Env):
             }
         )
         return obs, reward, terminated, truncated, info
+
+    def _terminal_reward(self) -> float:
+        total_tasks = max(len(self.task_manager.tasks), 1)
+        completed = self.task_manager.completed_tasks()
+        timed_out = self.task_manager.timed_out_tasks()
+        deadline_tasks = [task for task in self.task_manager.tasks.values() if task.deadline_s > 0]
+        on_time = [
+            task
+            for task in completed
+            if task.completion_time_s is not None and task.completion_time_s <= task.absolute_deadline_s
+        ]
+        completion_ratio = len(completed) / total_tasks
+        timeout_ratio = len(timed_out) / total_tasks
+        tdsr = len(on_time) / max(len(deadline_tasks), 1)
+        return float(
+            self.reward_cfg.get("terminal_completion_bonus", 5.0) * completion_ratio
+            + self.reward_cfg.get("terminal_tdsr_bonus", 2.0) * tdsr
+            - self.reward_cfg.get("terminal_timeout_penalty", 5.0) * timeout_ratio
+        )
 
     def _advance_clock(self, dt_s: float) -> None:
         if self.simpy_env is not None:

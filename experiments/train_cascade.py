@@ -146,6 +146,7 @@ def train_one_episode(scheduler: CASCADEMA3CScheduler, config_path: str, seed: i
     terminated = False
     truncated = False
     steps = 0
+    reward_parts_sum: dict[str, float] = {}
     scheduler.reset()
     while not (terminated or truncated) and steps < max_steps:
         action_mask = obs.get("action_mask", env.get_action_mask())
@@ -156,6 +157,9 @@ def train_one_episode(scheduler: CASCADEMA3CScheduler, config_path: str, seed: i
         rewards.append(float(reward))
         dones.append(done)
         total_reward += float(reward)
+        for key, value in info.items():
+            if key.startswith("cost_") or key.startswith("reward_"):
+                reward_parts_sum[f"{key}_sum"] = reward_parts_sum.get(f"{key}_sum", 0.0) + float(value)
         steps += 1
     metrics = scheduler.learn_episode(traces, rewards, dones)
     metrics.update(
@@ -168,6 +172,7 @@ def train_one_episode(scheduler: CASCADEMA3CScheduler, config_path: str, seed: i
             "atct_s": float(info.get("atct_s", 0.0)),
         }
     )
+    metrics.update(reward_parts_sum)
     return metrics
 
 
@@ -217,7 +222,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--actor-lr", type=float, default=3e-4)
     parser.add_argument("--critic-lr", type=float, default=1e-3)
-    parser.add_argument("--entropy-coef", type=float, default=0.01)
+    parser.add_argument("--entropy-coef", type=float, default=0.05)
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--gae-lambda", type=float, default=0.95)
     parser.add_argument("--token-dim", type=int, default=64)

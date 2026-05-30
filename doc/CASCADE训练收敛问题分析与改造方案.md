@@ -533,6 +533,62 @@ eval/makespan_s_mean 或 eval/atct_s_mean 是否下降
 train/entropy 是否从较高水平逐步下降
 ```
 
+## 已实施的第二批小幅改动
+
+根据 1000 episode 曲线，`train/entropy` 在训练早期快速塌缩，`train/loss_critic` 和 `train/total_reward` 仍然强烈抖动。说明当前策略过早变确定，同时 reward 的终局目标仍不够明确。第二批仍只做局部改动：
+
+1. 提高默认探索强度。
+   - 修改位置：`src/algorithms/cascade/ma3c_trainer.py`、`experiments/train_cascade.py`、`configs/algorithm/cascade_ma3c.yaml`
+   - 默认 `entropy_coef` 从 `0.01` 调整为 `0.05`。
+   - 目的：减缓 entropy 过早塌缩，避免 1000 episode 内策略快速锁死在次优分配模式。
+
+2. 增加 episode 终局 reward。
+   - 修改位置：`src/env/cascade_env.py`、`src/env/reward.py`、`configs/env/base.yaml`
+   - 终局 reward 默认：
+
+```text
+terminal_reward =
+  5.0 * completion_ratio
++ 2.0 * tdsr
+- 5.0 * timeout_ratio
+```
+
+   - 目的：让 episode 结束时的完成率、按时完成率、超时率直接进入优化目标，避免训练只依赖每步局部成本。
+
+3. 训练日志增加 reward 分项累计。
+   - 修改位置：`experiments/train_cascade.py`
+   - SwanLab 会记录 `train/cost_*_sum` 和 `train/reward_*_sum`。
+   - 重点观察：
+
+```text
+train/reward_completed_bonus_sum
+train/reward_timeout_penalty_sum
+train/reward_terminal_sum
+train/cost_total_sum
+train/cost_deadline_sum
+train/cost_overload_sum
+```
+
+第二轮复训建议仍先跑 1000 episodes，但不要直接接着旧 checkpoint 继续训练。旧 checkpoint 可能已经在低 entropy 策略上塌缩，建议从新随机种子重新开始：
+
+```bash
+python experiments/train_cascade.py \
+  --config configs/env/scenario_ds1_standard.yaml \
+  --eval-config configs/env/scenario_ds1_standard.yaml \
+  --train-episodes 1000 \
+  --eval-episodes 10 \
+  --eval-every 100 \
+  --max-steps 300 \
+  --model-num-uavs 15 \
+  --seed 1 \
+  --output-dir outputs/training/cascade_ma3c_ds1_signal_v2_1000ep \
+  --use-swanlab \
+  --swanlab-mode cloud \
+  --swanlab-workspace Linexus \
+  --swanlab-project cascade-uav-scheduling \
+  --swanlab-experiment cascade-ma3c-ds1-signal-v2-1000ep
+```
+
 ### P0：先确认不是评估随机策略
 
 必须先做：
