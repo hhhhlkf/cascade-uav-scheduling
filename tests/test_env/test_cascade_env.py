@@ -39,6 +39,25 @@ class CASCADEEnvTest(unittest.TestCase):
         self.assertEqual(obs["network_edge_attrs"].shape[2], 4)
         self.assertIn(info["current_region"], {region.region_id for region in env.scenario.regions})
 
+    def test_random_region_selection_is_seed_reproducible(self):
+        def region_trace(seed: int) -> list[str]:
+            config = load_yaml_config("configs/env/scenario_ds1_standard.yaml")
+            config = deepcopy(config)
+            config["env"]["max_steps"] = 6
+            config["scenario"]["num_regions"] = [3, 3]
+            config["scenario"]["uav_fault_probability"] = 0.0
+            config["scenario"]["emergency_injections"] = []
+            env = CASCADEEnv(config)
+            obs, info = env.reset(seed=seed)
+            trace = [info["current_region"]]
+            for _ in range(5):
+                obs, _, _, _, info = env.step(np.zeros_like(obs["action_mask"]))
+                trace.append(info["current_region"])
+            return trace
+
+        self.assertEqual(region_trace(7), region_trace(7))
+        self.assertNotEqual(region_trace(7), region_trace(8))
+
     def test_configured_emergency_injection(self):
         config = load_yaml_config("configs/env/scenario_s1_dongting.yaml")
         config = deepcopy(config)

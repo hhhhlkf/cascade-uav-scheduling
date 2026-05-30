@@ -2,6 +2,7 @@ env:
   max_steps: 200
   step_seconds: 30
   max_ready_tasks: 16
+  region_selection: random_ready
   seed: 0
 reward:
   lambda_load: 0.15
@@ -19,4 +20,3 @@ network:
   base_latency_ms: 4.0
   hop_latency_ms: 5.0
   rssi_threshold_dbm: -92.0
-

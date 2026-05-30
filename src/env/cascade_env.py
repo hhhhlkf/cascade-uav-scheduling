@@ -66,6 +66,7 @@ class CASCADEEnv(gym.Env):
         self.max_ready_tasks = int(self.env_cfg.get("max_ready_tasks", 16))
         self.step_seconds = float(self.env_cfg.get("step_seconds", 30.0))
         self.max_steps = int(self.env_cfg.get("max_steps", 200))
+        self.region_selection = str(self.env_cfg.get("region_selection", "random_ready"))
         self.rng = seed_everything(self.env_cfg.get("seed", 0))
         self.simpy_env = simpy.Environment() if simpy else None
         self.sim_time_s = 0.0
@@ -99,6 +100,7 @@ class CASCADEEnv(gym.Env):
         self._triggered_emergencies = set()
         self._faulted_uav_ids = set()
         self._build_world()
+        self._select_current_region(force=True)
         obs = self._observe()
         return obs, self._info()
 
@@ -129,7 +131,7 @@ class CASCADEEnv(gym.Env):
         timed_out = self.task_manager.timeout_overdue(self.sim_time_s)
         events = self._maybe_inject_events()
         self.network.update_topology([uav.uav for uav in self.uavs])
-        self._select_current_region()
+        self._select_current_region(force=True)
 
         next_ready = self.task_manager.get_ready_tasks(self.max_ready_tasks, region_id=self.current_region_id)
         reward, reward_parts = compute_reward(
@@ -169,6 +171,8 @@ class CASCADEEnv(gym.Env):
 
     def _build_world(self) -> None:
         self.scenario = ScenarioGenerator(self.config).generate()
+        self.env_cfg = self.config.get("env", {})
+        self.region_selection = str(self.env_cfg.get("region_selection", "random_ready"))
         self.uavs = [UAVSimulator(uav) for uav in self.scenario.uavs]
         self.task_manager = TaskManager(self.scenario.tasks)
         self.network = MeshNetworkSimulator(self.scenario.topo_config)
@@ -380,18 +384,21 @@ class CASCADEEnv(gym.Env):
             metrics[f"ptct_{prefix.lower()}_s"] = float(np.mean(prefix_durations)) if prefix_durations else 0.0
         return metrics
 
-    def _select_current_region(self) -> None:
+    def _select_current_region(self, force: bool = False) -> None:
         ready_regions = self.task_manager.regions_with_ready_tasks()
         if not ready_regions:
             return
-        if self.current_region_id in ready_regions:
+        if not force and self.current_region_id in ready_regions:
             return
-        region_ids = [region.region_id for region in self.scenario.regions] or ready_regions
-        for region_id in region_ids:
-            if region_id in ready_regions:
-                self.current_region_id = region_id
-                return
-        self.current_region_id = ready_regions[0]
+        self.current_region_id = self._choose_ready_region(ready_regions)
+
+    def _choose_ready_region(self, ready_regions: List[str]) -> str:
+        if self.region_selection in {"first_ready", "fixed"}:
+            return ready_regions[0]
+        if self.region_selection not in {"random_ready", "random"}:
+            raise ValueError(f"Unsupported region_selection: {self.region_selection}")
+        region_idx = int(self.rng.integers(0, len(ready_regions)))
+        return ready_regions[region_idx]
 
     def _current_region_feature(self) -> np.ndarray:
         for region in self.scenario.regions:
