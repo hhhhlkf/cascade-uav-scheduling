@@ -142,6 +142,15 @@ class CASCADEEnv(gym.Env):
             self.sim_time_s,
             self.reward_cfg,
         )
+        completed_bonus = float(self.reward_cfg.get("completed_bonus", 1.0)) * len(completed)
+        timeout_penalty = float(self.reward_cfg.get("timeout_penalty", 2.0)) * len(timed_out)
+        reward += completed_bonus - timeout_penalty
+        reward_parts.update(
+            {
+                "reward_completed_bonus": completed_bonus,
+                "reward_timeout_penalty": timeout_penalty,
+            }
+        )
         terminated = self.task_manager.all_terminal()
         truncated = self.step_count >= self.max_steps or self.sim_time_s >= self._simulation_duration_s()
         obs = self._observe()

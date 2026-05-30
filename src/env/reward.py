@@ -15,6 +15,8 @@ DEFAULT_REWARD_WEIGHTS = {
     "lambda_latency": 0.10,
     "lambda_deadline": 0.30,
     "lambda_priority": 0.20,
+    "completed_bonus": 1.0,
+    "timeout_penalty": 2.0,
 }
 
 
@@ -60,4 +62,3 @@ def compute_reward(
         "cost_priority": priority_cost,
         "cost_total": float(total_cost),
     }
-

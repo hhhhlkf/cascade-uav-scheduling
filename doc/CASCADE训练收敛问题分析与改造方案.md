@@ -506,6 +506,33 @@ debug/terminal_reason
 
 ## 推荐实施顺序
 
+## 已实施的第一批小幅改动
+
+当前已先做两处局部改动，没有调整模型主体结构：
+
+1. 训练时动作从确定性 Hungarian 解码改为按策略分布采样。
+   - 修改位置：`src/algorithms/cascade/ma3c_trainer.py`
+   - `decide()` 仍用于评估，继续使用 Hungarian，保证评估稳定。
+   - `decide_with_trace()` 用于训练，改为逐 UAV 在可行动作中采样任务，并记录真实采样动作的 `log_prob` 和 `entropy`。
+   - 目的：让 policy gradient 的 `log_prob(action)` 与动作生成过程一致，避免训练长期像随机评估。
+
+2. reward 增加轻量事件反馈。
+   - 修改位置：`src/env/cascade_env.py`、`src/env/reward.py`、`configs/env/base.yaml`
+   - 每步完成任务增加 `completed_bonus`，默认 `1.0`。
+   - 每步超时任务增加 `timeout_penalty`，默认 `2.0`。
+   - 目的：让完成任务和超时任务直接进入 reward，再进入 GAE 和 Actor-Critic loss，减少只靠间接 deadline 成本学习的难度。
+
+第一轮复训建议仍使用标准 DS1，但先不要混入更多大改动，观察 1000 到 3000 episodes 内：
+
+```text
+train/total_reward 是否上升
+train/timed_out_tasks 是否下降
+train/completed_tasks 是否上升
+eval/completion_ratio_mean 是否上升
+eval/makespan_s_mean 或 eval/atct_s_mean 是否下降
+train/entropy 是否从较高水平逐步下降
+```
+
 ### P0：先确认不是评估随机策略
 
 必须先做：

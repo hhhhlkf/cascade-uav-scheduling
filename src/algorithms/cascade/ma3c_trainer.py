@@ -107,9 +107,7 @@ class CASCADEMA3CScheduler(BaseScheduler):
         probs = self._masked_task_probabilities_tensor(logits, padded_mask)
         scores = probs[: action_mask.shape[0], : action_mask.shape[1]].detach().cpu().numpy().astype(np.float32)
         action = self._empty_action(action_mask)
-        assignments = masked_assignment(scores, action_mask)
-        log_prob = self._assignment_log_prob(probs, assignments)
-        entropy = self._masked_entropy(probs)
+        assignments, log_prob, entropy = self._sample_assignments(probs, action_mask)
         for task_idx, uav_idx in assignments:
             action[task_idx, uav_idx] = scores[task_idx, uav_idx]
         return action, {"log_prob": log_prob, "entropy": entropy, "value": value}
@@ -225,6 +223,42 @@ class CASCADEMA3CScheduler(BaseScheduler):
             return probs.sum() * 0.0
         selected = self.torch.stack([probs[task_idx, uav_idx].clamp_min(1e-8).log() for task_idx, uav_idx in assignments])
         return selected.sum()
+
+    def _sample_assignments(self, probs, action_mask: np.ndarray):
+        """Sample a one-to-one assignment for policy-gradient training.
+
+        Evaluation still uses deterministic Hungarian decoding in decide(). During
+        training, actions must be drawn from the policy distribution so the
+        collected log_prob matches the action generation process.
+        """
+        rows, cols = action_mask.shape
+        mask = self.torch.as_tensor(action_mask[:rows, :cols] > 0.0, dtype=self.torch.bool, device=probs.device)
+        used_tasks = self.torch.zeros(rows, dtype=self.torch.bool, device=probs.device)
+        assignments: list[tuple[int, int]] = []
+        log_probs = []
+        entropies = []
+        for uav_idx_tensor in self.torch.randperm(cols, device=probs.device):
+            uav_idx = int(uav_idx_tensor.detach().cpu().item())
+            valid_tasks = mask[:, uav_idx] & ~used_tasks
+            if not bool(valid_tasks.any()):
+                continue
+            task_probs = probs[:rows, uav_idx][valid_tasks]
+            prob_sum = task_probs.sum()
+            if float(prob_sum.detach().cpu().item()) <= 0.0:
+                continue
+            task_probs = task_probs / prob_sum.clamp_min(1e-8)
+            dist = self.torch.distributions.Categorical(probs=task_probs)
+            sampled_local_idx = dist.sample()
+            valid_indices = self.torch.nonzero(valid_tasks, as_tuple=False).reshape(-1)
+            task_idx = int(valid_indices[sampled_local_idx].detach().cpu().item())
+            assignments.append((task_idx, uav_idx))
+            log_probs.append(dist.log_prob(sampled_local_idx))
+            entropies.append(dist.entropy())
+            used_tasks[task_idx] = True
+        if not log_probs:
+            zero = probs.sum() * 0.0
+            return [], zero, zero
+        return assignments, self.torch.stack(log_probs).sum(), self.torch.stack(entropies).mean()
 
     def _masked_entropy(self, probs):
         valid = probs > 0.0
