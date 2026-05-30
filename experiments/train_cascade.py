@@ -4,6 +4,7 @@ import argparse
 import csv
 import json
 import sys
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 
@@ -47,6 +48,8 @@ def main() -> None:
             "eval_episodes": args.eval_episodes,
             "eval_every": args.eval_every,
             "max_steps": args.max_steps,
+            "seed_pool_size": args.seed_pool_size,
+            "rolling_window": args.rolling_window,
             "seed": args.seed,
             "checkpoint": args.checkpoint,
             "model_num_uavs": args.model_num_uavs,
@@ -62,10 +65,12 @@ def main() -> None:
     )
     train_rows = []
     eval_history = []
+    rolling_rows = deque(maxlen=max(1, args.rolling_window))
     print(
         "Starting CASCADE training: "
         f"train_episodes={args.train_episodes}, eval_every={args.eval_every}, "
-        f"eval_episodes={args.eval_episodes}, max_steps={args.max_steps}, seed={args.seed}"
+        f"eval_episodes={args.eval_episodes}, max_steps={args.max_steps}, seed={args.seed}, "
+        f"seed_pool_size={args.seed_pool_size}, rolling_window={args.rolling_window}"
     )
     print(f"Training config: {args.config}")
     print(f"Evaluation config: {args.eval_config}")
@@ -82,20 +87,25 @@ def main() -> None:
         episode_iter = progress_bar
 
     for episode in episode_iter:
+        train_seed = args.seed + (episode % args.seed_pool_size if args.seed_pool_size > 0 else episode)
         row = train_one_episode(
             scheduler,
             config_path=args.config,
-            seed=args.seed + episode,
+            seed=train_seed,
             max_steps=args.max_steps,
         )
         row["episode"] = episode
-        row["seed"] = args.seed + episode
+        row["seed"] = train_seed
         train_rows.append(row)
+        rolling_rows.append(row)
+        rolling_metrics = _rolling_means(rolling_rows)
         swanlab.log_metrics("train", row, step=episode + 1)
+        swanlab.log_metrics("train_ma", rolling_metrics, step=episode + 1)
         if progress_bar is not None:
             progress_bar.set_postfix(
                 {
                     "reward": f"{row.get('total_reward', 0.0):.3f}",
+                    "reward_ma": f"{rolling_metrics.get('total_reward', 0.0):.3f}",
                     "actor": f"{row.get('loss_actor', 0.0):.3f}",
                     "critic": f"{row.get('loss_critic', 0.0):.3f}",
                     "entropy": f"{row.get('entropy', 0.0):.3f}",
@@ -204,6 +214,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-every", type=int, default=5)
     parser.add_argument("--max-steps", type=int, default=300)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--seed-pool-size",
+        type=int,
+        default=0,
+        help="Cycle through a fixed pool of training seeds. 0 keeps using a fresh seed every episode.",
+    )
+    parser.add_argument("--rolling-window", type=int, default=50, help="Window size for train_ma SwanLab metrics.")
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--checkpoint", default=None, help="Optional CASCADE checkpoint to resume from.")
     parser.add_argument("--model-num-uavs", type=int, default=15, help="Fixed CASCADE model UAV capacity for cross-scenario checkpoints.")
@@ -235,6 +252,24 @@ def _progress_write(progress_bar, message: str) -> None:
         progress_bar.write(message)
         return
     print(message)
+
+
+def _rolling_means(rows) -> dict[str, float]:
+    excluded = {"episode", "seed"}
+    keys = sorted(
+        {
+            key
+            for row in rows
+            for key, value in row.items()
+            if key not in excluded and isinstance(value, (int, float))
+        }
+    )
+    means: dict[str, float] = {}
+    for key in keys:
+        values = [float(row[key]) for row in rows if key in row]
+        if values:
+            means[key] = sum(values) / len(values)
+    return means
 
 
 def _write_rows(path: Path, rows: list[dict[str, float]]) -> None:

@@ -1,0 +1,33 @@
+defaults:
+  - base
+
+scenario:
+  name: ds0_easy
+  distribution: DS1
+  disaster_area_km2: [4, 9]
+  flood_ratio: [0.2, 0.3]
+  building_density: [low, medium]
+  civilian_density: [3, 8]
+  comm_failure_rate: [0.0, 0.0]
+  breach_risk_level: [0, 1]
+  terrain_roughness: [flat]
+  num_regions: [1, 1]
+  num_uavs_total: [5, 6]
+  uav_orin_8gb_ratio: [0.4, 0.4]
+  simulation_duration_s: 3600
+  uav_fault_probability: 0.0
+  sensor_fault_probability: 0.0
+  emergency_injections: []
+
+env:
+  max_steps: 100
+  step_seconds: 30
+  max_ready_tasks: 8
+  region_selection: first_ready
+
+reward:
+  completed_bonus: 1.5
+  timeout_penalty: 2.0
+  terminal_completion_bonus: 6.0
+  terminal_tdsr_bonus: 2.0
+  terminal_timeout_penalty: 5.0

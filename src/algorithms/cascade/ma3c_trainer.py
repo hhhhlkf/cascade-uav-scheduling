@@ -151,7 +151,7 @@ class CASCADEMA3CScheduler(BaseScheduler):
         if advantages.numel() > 1:
             advantages = (advantages - advantages.mean()) / advantages.std(unbiased=False).clamp_min(1e-6)
         actor_loss = -(log_probs * advantages.detach()).mean()
-        critic_loss = self.torch.nn.functional.mse_loss(values, returns)
+        critic_loss = self.torch.nn.functional.smooth_l1_loss(values, returns)
         entropy = entropies.mean()
         loss = actor_loss + 0.5 * critic_loss - self.config.entropy_coef * entropy
         self.optimizer.zero_grad()

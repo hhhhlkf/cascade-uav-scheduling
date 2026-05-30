@@ -589,6 +589,107 @@ python experiments/train_cascade.py \
   --swanlab-experiment cascade-ma3c-ds1-signal-v2-1000ep
 ```
 
+## 已实施的第三批小幅改动
+
+如果以下曲线都不收敛：
+
+```text
+train/cost_total_sum
+train/cost_deadline_sum
+train/cost_overload_sum
+train/reward_completed_bonus_sum
+train/reward_timeout_penalty_sum
+train/reward_terminal_sum
+```
+
+说明问题已经不只是 reward 形状，而是训练场景随机性和任务复杂度把单 episode 学习信号完全淹没。第三批仍不改模型主体，先把训练控制做得更可诊断：
+
+1. 新增 easy curriculum 场景。
+   - 文件：`configs/env/scenario_ds0_easy.yaml`
+   - 特点：单区域、小地图、无通信故障、无 UAV 故障、任务数更少、固定 `first_ready` 区域选择。
+   - 目的：先验证模型是否能在低噪声环境学会基本 task-UAV 匹配。如果在 `ds0_easy` 也不收敛，问题就在动作/算法实现；如果 `ds0_easy` 能收敛而 DS1 不能，问题主要是场景难度和随机性。
+
+2. 训练脚本新增固定 seed 池。
+   - 参数：`--seed-pool-size`
+   - 默认 `0`，表示每个 episode 继续使用新 seed。
+   - 设置为 `32` 或 `64` 时，训练会在固定数量场景上循环，降低随机场景分布带来的 reward 方差。
+
+3. SwanLab 新增滚动均值曲线。
+   - 参数：`--rolling-window`，默认 `50`。
+   - 新增指标前缀：`train_ma/*`
+   - 例如：
+
+```text
+train_ma/total_reward
+train_ma/reward_terminal_sum
+train_ma/reward_timeout_penalty_sum
+train_ma/cost_total_sum
+train_ma/completed_tasks
+train_ma/timed_out_tasks
+```
+
+后续判断收敛优先看 `train_ma/*` 和周期性 `eval/*`，不要只看单 episode 的 `train/*`，因为场景每轮都随机重采样，单点曲线天然高噪声。
+
+4. Critic 损失从 MSE 改成 Huber。
+   - 修改位置：`src/algorithms/cascade/ma3c_trainer.py`
+   - `mse_loss(values, returns)` 改为 `smooth_l1_loss(values, returns)`。
+   - 目的：降低高方差 return 对 critic 的尖峰冲击，缓和 `train/loss_critic` 的大幅抖动。
+
+第三轮建议先不要直接跑 DS1，而是先跑 easy 场景：
+
+```bash
+python experiments/train_cascade.py \
+  --config configs/env/scenario_ds0_easy.yaml \
+  --eval-config configs/env/scenario_ds0_easy.yaml \
+  --train-episodes 1000 \
+  --eval-episodes 20 \
+  --eval-every 100 \
+  --max-steps 100 \
+  --model-num-uavs 15 \
+  --seed 0 \
+  --seed-pool-size 32 \
+  --rolling-window 50 \
+  --output-dir outputs/training/cascade_ds0_easy_seedpool32_1000ep \
+  --use-swanlab \
+  --swanlab-mode cloud \
+  --swanlab-workspace Linexus \
+  --swanlab-project cascade-uav-scheduling \
+  --swanlab-experiment cascade-ds0-easy-seedpool32-1000ep
+```
+
+判断条件：
+
+```text
+train_ma/total_reward 上升
+train_ma/timed_out_tasks 下降
+train_ma/reward_timeout_penalty_sum 下降
+eval/completion_ratio_mean 上升
+eval/timed_out_tasks_mean 下降
+```
+
+如果 `ds0_easy` 能收敛，再迁移到 DS1：
+
+```bash
+python experiments/train_cascade.py \
+  --checkpoint outputs/training/cascade_ds0_easy_seedpool32_1000ep/cascade_ma3c.pt \
+  --config configs/env/scenario_ds1_standard.yaml \
+  --eval-config configs/env/scenario_ds1_standard.yaml \
+  --train-episodes 3000 \
+  --eval-episodes 20 \
+  --eval-every 100 \
+  --max-steps 300 \
+  --model-num-uavs 15 \
+  --seed 1000 \
+  --seed-pool-size 64 \
+  --rolling-window 100 \
+  --output-dir outputs/training/cascade_ds1_from_easy_seedpool64_3000ep \
+  --use-swanlab \
+  --swanlab-mode cloud \
+  --swanlab-workspace Linexus \
+  --swanlab-project cascade-uav-scheduling \
+  --swanlab-experiment cascade-ds1-from-easy-seedpool64-3000ep
+```
+
 ### P0：先确认不是评估随机策略
 
 必须先做：
