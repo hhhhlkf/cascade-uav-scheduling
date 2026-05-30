@@ -746,6 +746,58 @@ python experiments/train_cascade.py \
 
 如果行为克隆后仍然完全不收敛，下一步不应继续调 reward，而应检查 actor 表达能力：当前 UAV-centric actor 可能无法稳定表达 task-UAV pair 匹配，需要进入 pairwise scorer 改造。
 
+## 已实施的第五批改动：BC 数据集化与多 epoch 训练
+
+如果 `bc/loss_bc` 不下降而是呈规律波动，通常是因为旧版 BC warm-up 是“边采样边训练”：episode 按固定 seed pool 循环，loss 会跟着场景难度周期性起伏，不像标准监督学习那样对同一数据集反复优化。
+
+第五批将 BC 改为两阶段：
+
+1. 先用启发式老师收集固定专家数据集。
+2. 再随机打乱数据集，做多轮 BC 训练。
+
+新增参数：
+
+```text
+--bc-epochs
+--bc-max-transitions
+```
+
+推荐命令：
+
+```bash
+python experiments/train_cascade.py \
+  --config configs/env/scenario_ds0_easy.yaml \
+  --eval-config configs/env/scenario_ds0_easy.yaml \
+  --bc-episodes 300 \
+  --bc-epochs 10 \
+  --bc-max-transitions 5000 \
+  --bc-teacher heft \
+  --train-episodes 1000 \
+  --eval-episodes 20 \
+  --eval-every 100 \
+  --max-steps 100 \
+  --model-num-uavs 15 \
+  --seed 0 \
+  --seed-pool-size 32 \
+  --rolling-window 50 \
+  --output-dir outputs/training/cascade_ds0_easy_bc_dataset_heft_1000ep \
+  --use-swanlab \
+  --swanlab-mode cloud \
+  --swanlab-workspace Linexus \
+  --swanlab-project cascade-uav-scheduling \
+  --swanlab-experiment cascade-ds0-easy-bc-dataset-heft-1000ep
+```
+
+判断：
+
+```text
+bc/loss_bc 应该随 bc epoch 下降
+bc/bc_entropy 通常会下降
+bc/dataset_size 应该稳定为收集到的 transition 数
+```
+
+如果数据集化 BC 的 `bc/loss_bc` 仍然不下降，说明当前 actor 的 UAV-centric 输出结构无法稳定模仿启发式 task-UAV pair 匹配。下一步应进入结构改造：改为 task-UAV pairwise scorer，而不是继续调整 reward。
+
 ### P0：先确认不是评估随机策略
 
 必须先做：

@@ -8,6 +8,8 @@ from collections import deque
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.algorithms.cascade.config_utils import max_ready_tasks_from_config, max_uavs_from_config
@@ -53,6 +55,8 @@ def main() -> None:
             "rolling_window": args.rolling_window,
             "bc_episodes": args.bc_episodes,
             "bc_teacher": args.bc_teacher,
+            "bc_epochs": args.bc_epochs,
+            "bc_max_transitions": args.bc_max_transitions,
             "seed": args.seed,
             "checkpoint": args.checkpoint,
             "model_num_uavs": args.model_num_uavs,
@@ -81,12 +85,18 @@ def main() -> None:
     if args.checkpoint:
         print(f"Resuming from checkpoint: {args.checkpoint}")
     if args.bc_episodes > 0:
-        print(f"Starting behavior cloning warm-up: teacher={args.bc_teacher}, episodes={args.bc_episodes}")
+        print(
+            "Starting behavior cloning warm-up: "
+            f"teacher={args.bc_teacher}, episodes={args.bc_episodes}, "
+            f"epochs={args.bc_epochs}, max_transitions={args.bc_max_transitions}"
+        )
         bc_rows = run_behavior_cloning(
             scheduler,
             config_path=args.config,
             teacher_name=args.bc_teacher,
             episodes=args.bc_episodes,
+            epochs=args.bc_epochs,
+            max_transitions=args.bc_max_transitions,
             seed=args.seed + args.bc_seed_offset,
             max_steps=args.max_steps,
             seed_pool_size=args.seed_pool_size,
@@ -209,6 +219,8 @@ def run_behavior_cloning(
     config_path: str,
     teacher_name: str,
     episodes: int,
+    epochs: int,
+    max_transitions: int,
     seed: int,
     max_steps: int,
     seed_pool_size: int,
@@ -216,50 +228,85 @@ def run_behavior_cloning(
     swanlab: SwanLabLogger,
 ) -> list[dict[str, float]]:
     teacher_cls = _teacher_class(teacher_name)
-    rows = []
+    dataset = []
+    teacher_rows = []
     episode_iter = range(episodes)
     if show_progress:
         from tqdm.auto import tqdm
 
-        episode_iter = tqdm(episode_iter, desc="BC warm-up", unit="ep", dynamic_ncols=True)
+        episode_iter = tqdm(episode_iter, desc="Collect BC data", unit="ep", dynamic_ncols=True)
     for episode in episode_iter:
         train_seed = seed + (episode % seed_pool_size if seed_pool_size > 0 else episode)
         env = CASCADEEnv(config_path)
         obs, _ = env.reset(seed=train_seed)
         teacher = teacher_cls(env.max_ready_tasks, len(env.uavs))
-        losses = []
-        targets = []
-        entropies = []
         total_reward = 0.0
         terminated = False
         truncated = False
         steps = 0
-        while not (terminated or truncated) and steps < max_steps:
+        targets = 0.0
+        while not (terminated or truncated) and steps < max_steps and len(dataset) < max_transitions:
             action_mask = obs.get("action_mask", env.get_action_mask())
             teacher.observe(obs)
             target_action = teacher.decide(action_mask)
-            metrics = scheduler.behavior_clone_step(obs, action_mask, target_action)
-            if metrics["bc_targets"] > 0.0:
-                losses.append(metrics["loss_bc"])
-                targets.append(metrics["bc_targets"])
-                entropies.append(metrics["bc_entropy"])
+            if target_action.any():
+                dataset.append(
+                    (
+                        {key: value.copy() for key, value in obs.items()},
+                        action_mask.copy(),
+                        target_action.copy(),
+                    )
+                )
+                targets += float((target_action > 0.0).sum())
             obs, reward, terminated, truncated, info = env.step(target_action)
             total_reward += float(reward)
             steps += 1
+        teacher_rows.append(
+            {
+                "episode": float(episode),
+                "seed": float(train_seed),
+                "teacher_total_reward": total_reward,
+                "teacher_completed_tasks": float(info.get("completed_tasks", 0.0)),
+                "teacher_timed_out_tasks": float(info.get("timed_out_tasks", 0.0)),
+                "teacher_targets": targets,
+                "steps": float(steps),
+                "dataset_size": float(len(dataset)),
+            }
+        )
+        if len(dataset) >= max_transitions:
+            break
+    rows = []
+    if not dataset:
+        return rows
+    rng = np.random.default_rng(seed)
+    epoch_iter = range(max(1, epochs))
+    if show_progress:
+        from tqdm.auto import tqdm
+
+        epoch_iter = tqdm(epoch_iter, desc="Train BC actor", unit="epoch", dynamic_ncols=True)
+    for epoch in epoch_iter:
+        losses = []
+        targets = []
+        entropies = []
+        indices = rng.permutation(len(dataset))
+        for idx in indices:
+            obs, action_mask, target_action = dataset[int(idx)]
+            metrics = scheduler.behavior_clone_step(obs, action_mask, target_action)
+            if metrics["bc_targets"] <= 0.0:
+                continue
+            losses.append(metrics["loss_bc"])
+            targets.append(metrics["bc_targets"])
+            entropies.append(metrics["bc_entropy"])
         row = {
-            "episode": float(episode),
-            "seed": float(train_seed),
+            "epoch": float(epoch),
             "loss_bc": float(sum(losses) / len(losses)) if losses else 0.0,
             "bc_targets": float(sum(targets)),
             "bc_entropy": float(sum(entropies) / len(entropies)) if entropies else 0.0,
-            "teacher_total_reward": total_reward,
-            "teacher_completed_tasks": float(info.get("completed_tasks", 0.0)),
-            "teacher_timed_out_tasks": float(info.get("timed_out_tasks", 0.0)),
-            "steps": float(steps),
+            "dataset_size": float(len(dataset)),
         }
         rows.append(row)
-        swanlab.log_metrics("bc", row, step=episode + 1)
-    return rows
+        swanlab.log_metrics("bc", row, step=epoch + 1, excluded={"episode", "seed", "epoch"})
+    return teacher_rows + rows
 
 
 def _build_scheduler(args: argparse.Namespace) -> CASCADEMA3CScheduler:
@@ -298,6 +345,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--rolling-window", type=int, default=50, help="Window size for train_ma SwanLab metrics.")
     parser.add_argument("--bc-episodes", type=int, default=0, help="Behavior cloning warm-up episodes before RL training.")
+    parser.add_argument("--bc-epochs", type=int, default=5, help="Training epochs over the collected BC dataset.")
+    parser.add_argument("--bc-max-transitions", type=int, default=5000, help="Maximum expert transitions collected for BC.")
     parser.add_argument(
         "--bc-teacher",
         choices=["greedy", "min_load", "heft"],
